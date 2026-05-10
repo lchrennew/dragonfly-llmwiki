@@ -12,6 +12,7 @@ Thumbs.db
 
 # Dependencies
 node_modules/
+*-lock.json
 
 # Environment
 .env
@@ -34,7 +35,7 @@ raw/assets/*
 !raw/assets/.gitkeep
 
 # Wiki content (AI-generated, user-specific)
-wiki/*.md
+wiki/*
 wiki/sources/*
 wiki/entities/*
 wiki/concepts/*
@@ -50,3 +51,5 @@ wiki/log.md
 # Logs
 *.log
 npm-debug.log*
+/wiki/domains/_meta.json
+/wiki/domains/*.md
