@@ -696,7 +696,7 @@ ${domainList}
       if (results.length > 0) {
         appendChat('system', `  🔍 搜索到 ${results.length} 个相关页面`);
         screen.render();
-        for (const r of results.slice(0, 5)) {
+        for (const r of results) {
           const content = wiki.readFile(r.path);
           if (content) {
             searchContext += `\n\n--- ${r.path} (${r.title || r.path}) ---\n${content}`;

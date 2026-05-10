@@ -225,7 +225,7 @@ export function searchWiki(keywords) {
   }
 
   results.sort((a, b) => b.score - a.score);
-  return results.slice(0, 10);
+  return results;
 }
 
 export async function fetchUrl(url) {
