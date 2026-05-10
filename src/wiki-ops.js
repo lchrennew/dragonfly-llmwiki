@@ -151,6 +151,83 @@ export function listWikiFiles() {
   return results;
 }
 
+export function buildSearchIndex() {
+  const wikiFiles = listWikiFiles();
+  const index = [];
+
+  for (const file of wikiFiles) {
+    const content = readFile(file.path);
+    if (!content) continue;
+
+    const entry = { path: file.path, category: file.category, keywords: [] };
+
+    const baseName = file.name.replace('.md', '').replace(/-/g, ' ');
+    entry.keywords.push(baseName);
+
+    const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
+    if (fmMatch) {
+      const fm = fmMatch[1];
+      const titleMatch = fm.match(/title:\s*(.+)/);
+      if (titleMatch) entry.title = titleMatch[1].trim();
+
+      const tagsMatch = fm.match(/tags:\s*\[([^\]]*)\]/);
+      if (tagsMatch) {
+        entry.keywords.push(...tagsMatch[1].split(',').map(t => t.trim().replace(/['"]/g, '')));
+      }
+
+      const aliasesMatch = fm.match(/aliases:\s*\[([^\]]*)\]/);
+      if (aliasesMatch) {
+        entry.keywords.push(...aliasesMatch[1].split(',').map(t => t.trim().replace(/['"]/g, '')));
+      }
+
+      const domainsMatch = fm.match(/domains:\s*\[([^\]]*)\]/);
+      if (domainsMatch) {
+        entry.keywords.push(...domainsMatch[1].split(',').map(t => t.trim().replace(/['"]/g, '')));
+      }
+    }
+
+    if (entry.title) entry.keywords.push(entry.title);
+    entry.keywords = [...new Set(entry.keywords.filter(k => k))];
+    index.push(entry);
+  }
+
+  return index;
+}
+
+export function searchWiki(keywords) {
+  const index = buildSearchIndex();
+  const results = [];
+
+  for (const entry of index) {
+    let score = 0;
+    const entryText = entry.keywords.join(' ').toLowerCase();
+
+    for (const kw of keywords) {
+      const kwLower = kw.toLowerCase();
+      if (entryText.includes(kwLower)) {
+        score += 10;
+      }
+      for (const ek of entry.keywords) {
+        if (ek.toLowerCase() === kwLower) {
+          score += 20;
+          break;
+        }
+      }
+      const baseName = entry.path.split('/').pop().replace('.md', '').replace(/-/g, ' ');
+      if (baseName.toLowerCase().includes(kwLower)) {
+        score += 15;
+      }
+    }
+
+    if (score > 0) {
+      results.push({ ...entry, score });
+    }
+  }
+
+  results.sort((a, b) => b.score - a.score);
+  return results.slice(0, 10);
+}
+
 export async function fetchUrl(url) {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
@@ -182,14 +259,54 @@ export function appendToLog(entry) {
   fs.writeFileSync(logPath, lines.join('\n'), 'utf-8');
 }
 
-export function getSystemPrompt() {
-  const agentsPath = path.join(ROOT, 'AGENTS.md');
-  const schema = fs.existsSync(agentsPath) ? fs.readFileSync(agentsPath, 'utf-8') : '';
+export function getSystemPrompt(mode = 'ingest') {
   const indexPath = path.join(WIKI_DIR, 'index.md');
   const index = fs.existsSync(indexPath) ? fs.readFileSync(indexPath, 'utf-8') : '';
   const overviewPath = path.join(WIKI_DIR, 'overview.md');
   const overview = fs.existsSync(overviewPath) ? fs.readFileSync(overviewPath, 'utf-8') : '';
 
+  if (mode === 'query') {
+    const wikiFiles = listWikiFiles();
+    const fileList = wikiFiles.map(f => `- ${f.path}`).join('\n');
+
+    return `你是一个 LLM Wiki 知识库助手。用户会向你提问，你需要基于 Wiki 中的内容回答。
+
+当前 Wiki 索引（只列领域）：
+${index}
+
+当前 Wiki 总览：
+${overview}
+
+当前 Wiki 中存在的所有文件：
+${fileList}
+
+## 检索机制
+
+你可以请求读取 Wiki 中的任何文件来获取详细信息。使用以下格式：
+<<<READ:wiki/domains/xxx.md>>>
+<<<READ:wiki/concepts/yyy.md>>>
+
+系统会返回文件内容，然后你可以继续检索或回答问题。
+
+## 查询流程
+
+1. 根据用户问题，判断涉及哪些领域
+2. 请求读取相关领域索引页（wiki/domains/xxx.md），了解该领域有哪些概念和实体
+3. 如果领域索引页中有子领域（children），且问题可能涉及子领域，继续读取子领域索引页
+4. 请求读取具体的概念/实体页面获取详细信息
+5. 信息充足后，综合回答问题，附带 [[页面引用]]
+
+## 规则
+
+- 如果需要读取文件，只输出 READ 指令，不要输出其他内容
+- 可以一次请求多个文件（最多3个）
+- 从文件中发现有用信息时，用 <<<NOTE:要点内容>>> 记录关键发现（系统会保留这些笔记作为后续轮次的上下文）
+- 信息充足后直接回答，不需要再输出 READ 或 NOTE 指令
+- 如果 Wiki 中没有相关信息，直接告知用户`;
+  }
+
+  const agentsPath = path.join(ROOT, 'AGENTS.md');
+  const schema = fs.existsSync(agentsPath) ? fs.readFileSync(agentsPath, 'utf-8') : '';
   const wikiFiles = listWikiFiles();
   const fileList = wikiFiles.map(f => `- ${f.path}`).join('\n');
 
@@ -229,20 +346,17 @@ ${fileList}
    e. **更新领域索引页**：
       - 将新增的概念和实体添加到对应的领域索引页
       - 更新领域之间的父子关系（如果需要）
-   f. 更新 wiki/index.md 添加所有新条目（按领域组织）
+   f. 更新 wiki/index.md（只列领域及简要描述，不列具体条目）
    g. 更新 wiki/overview.md 反映新增内容对整体知识库的影响
    h. 在 wiki/log.md 追加操作记录
-2. 当用户提问时，基于 Wiki 内容综合回答。你可以根据文件列表中的路径来判断知识库中有哪些内容，必要时告知用户具体有哪些相关页面。
-3. 当用户要求健康检查时，分析 Wiki 状态并给出建议，包括：
-   - 检查领域是否需要细分（概念数>20）
-   - 检查领域是否需要合并（大量重叠）
-   - 检查领域命名是否一致
+2. 当用户要求健康检查时，分析 Wiki 状态并给出建议
 
 重要提醒：
 - 摄入资料时，必须为文档中的**每个**概念创建独立页面
 - 即使一个文档包含10个概念，也要创建10个独立的概念页面
 - 概念之间通过 [[链接]] 建立关联，而不是合并到一个页面
-- 你必须输出所有需要创建或修改的文件，包括 overview.md
+- index.md 只列顶层领域（没有 parent 的领域）目录和统计数字，子领域不出现在 index.md 中
+- 你必须输出所有需要创建或修改的文件
 - 每个文件使用以下格式：
 <<<FILE:相对路径>>>
 文件内容

@@ -24,10 +24,8 @@ dragonfly-llmwiki/
 │   ├── concepts/      # 概念页面（理论、方法、模式等）
 │   ├── sources/       # 来源摘要页面
 │   └── analyses/      # 分析和比较页面
-└── tools/             # CLI 辅助工具
-    ├── ingest.sh      # 资料摄入脚本
-    ├── query.sh       # 查询脚本
-    └── lint.sh        # Wiki 健康检查脚本
+└── src/               # 应用源码
+    └── app.js         # TUI 主入口
 ```
 
 ## 页面格式约定
@@ -115,20 +113,22 @@ updated: YYYY-MM-DD
 7. **更新领域索引页**：
    - 将新增的概念和实体添加到对应的领域索引页
    - 更新领域之间的父子关系（如果需要）
-8. 更新 `wiki/index.md` 添加所有新条目（按领域组织）
+8. 更新 `wiki/index.md`（只列领域目录和统计数字，不列具体条目）
 9. 检查新信息是否与现有内容矛盾，如有则标注
 10. 更新 `wiki/overview.md` 反映新增内容对整体知识库的影响
 11. 在 `wiki/log.md` 追加操作记录
 
 ### 2. Query（查询）
 
-当用户提出问题时：
+当用户提出问题时，通过多步检索获取相关信息：
 
-1. 先阅读 `wiki/index.md` 定位相关页面
-2. 阅读相关 Wiki 页面
-3. 综合信息回答问题，附带引用
-4. 如果答案有价值，建议将其保存为新的分析页面到 `wiki/analyses/`
-5. 在 `wiki/log.md` 追加查询记录
+1. 阅读 `wiki/index.md` 中的领域列表，判断问题涉及哪些领域
+2. 使用 `<<<READ:路径>>>` 指令请求读取相关领域索引页（如 `wiki/domains/deep-learning.md`）
+3. 根据领域索引页中的条目，继续请求读取具体的概念/实体页面
+4. 信息充足后，综合回答问题，附带引用
+5. 如果答案有价值，建议将其保存为新的分析页面到 `wiki/analyses/`
+
+注意：每次请求读取文件时，使用格式 `<<<READ:wiki/concepts/xxx.md>>>`，系统会自动返回文件内容。可以一次请求多个文件。
 
 ### 3. Lint（健康检查）
 
@@ -368,46 +368,21 @@ ml → machine-learning
 ```markdown
 # Wiki 索引
 
-## 按领域组织
+## 领域目录
 
-### 深度学习 (Deep Learning)
-**概念**: [[concepts/transformer]], [[concepts/attention-mechanism]], [[concepts/backpropagation]]
-**实体**: [[entities/geoffrey-hinton]], [[entities/pytorch]]
-**来源**: [[sources/attention-is-all-you-need]]
+- [[domains/deep-learning]] - 深度学习：神经网络、注意力机制、模型训练等
+- [[domains/software-engineering]] - 软件工程：架构设计、开发方法、工程实践等
+- [[domains/product-management]] - 产品管理：需求分析、用户研究、产品策略等
 
-### 软件工程 (Software Engineering)
-**概念**: [[concepts/microservices]], [[concepts/ci-cd]], [[concepts/tdd]]
-**实体**: [[entities/martin-fowler]], [[entities/kubernetes]]
-**来源**: [[sources/clean-architecture]]
+## 统计
 
----
-
-## 所有领域
-
-- [[domains/deep-learning]] - 深度学习
-- [[domains/software-engineering]] - 软件工程
-- [[domains/product-management]] - 产品管理
-
-## 所有概念
-
-- [[concepts/attention-mechanism]] - 注意力机制 (deep-learning)
-- [[concepts/microservices]] - 微服务架构 (software-engineering)
-- [[concepts/transformer]] - Transformer架构 (deep-learning)
-
-## 所有实体
-
-- [[entities/geoffrey-hinton]] - Geoffrey Hinton (deep-learning)
-- [[entities/martin-fowler]] - Martin Fowler (software-engineering)
-
-## 所有来源
-
-- [[sources/attention-is-all-you-need]] - Attention Is All You Need (2017-06-12)
-- [[sources/clean-architecture]] - Clean Architecture (2017-09-10)
-
-## 所有分析
-
-- [[analyses/transformer-vs-rnn]] - Transformer与RNN的对比分析
+- 领域数: 3
+- 概念数: 15
+- 实体数: 8
+- 来源数: 5
 ```
+
+注意：index.md 只列出**顶层领域**（没有 parent 的领域）及其简要描述，不列出子领域和具体的概念/实体/来源。子领域通过父领域索引页的 children 字段访问。
 
 ### log.md 格式
 

@@ -99,7 +99,6 @@ const inputBox = blessed.textbox({
     label: { fg: 'magenta' },
     fg: 'white',
   },
-  inputOnFocus: true,
   mouse: true,
 });
 
@@ -195,11 +194,202 @@ async function handleUserInput(text) {
     process.exit(0);
   }
 
+  if (text === '/prune') {
+    const indexContent = wiki.readFile('wiki/index.md');
+    if (!indexContent) {
+      appendChat('system', 'wiki/index.md 不存在，请先执行 /reindex');
+      return;
+    }
+
+    const domainLinkRegex = /\[\[domains\/([^\]]+)\]\]/g;
+    let match;
+    const topDomains = new Set();
+    while ((match = domainLinkRegex.exec(indexContent)) !== null) {
+      topDomains.add(match[1].replace('.md', ''));
+    }
+
+    if (topDomains.size === 0) {
+      appendChat('system', 'index.md 中没有找到领域链接');
+      return;
+    }
+
+    const reachable = new Set();
+    const queue = [...topDomains];
+    while (queue.length > 0) {
+      const domain = queue.shift();
+      if (reachable.has(domain)) continue;
+      reachable.add(domain);
+      const domainContent = wiki.readFile(`wiki/domains/${domain}.md`);
+      if (!domainContent) continue;
+      const fmMatch = domainContent.match(/^---\n([\s\S]*?)\n---/);
+      if (!fmMatch) continue;
+      const childrenMatch = fmMatch[1].match(/children:\s*\[([^\]]*)\]/);
+      if (childrenMatch) {
+        const children = childrenMatch[1].split(',').map(c => c.trim().replace(/['"]/g, '')).filter(c => c);
+        for (const child of children) {
+          if (!reachable.has(child)) queue.push(child);
+        }
+      }
+    }
+
+    const wikiFiles = wiki.listWikiFiles();
+    const domainFiles = wikiFiles.filter(f => f.category === 'domains' && f.name.endsWith('.md'));
+    const unreachable = domainFiles.filter(f => {
+      const name = f.name.replace('.md', '');
+      return !reachable.has(name);
+    });
+
+    if (unreachable.length === 0) {
+      appendChat('system', `✓ 所有领域索引页均可达（共 ${reachable.size} 个领域）`);
+      return;
+    }
+
+    appendChat('system', `发现 ${unreachable.length} 个不可达的领域索引页：`);
+    for (const f of unreachable) {
+      appendChat('system', `  - ${f.path}`);
+    }
+
+    for (const f of unreachable) {
+      const fullPath = path.join(wiki.ROOT, f.path);
+      if (fs.existsSync(fullPath)) {
+        fs.unlinkSync(fullPath);
+      }
+    }
+    appendChat('system', `✓ 已删除 ${unreachable.length} 个不可达的领域索引页`);
+    return;
+  }
+
   if (text === '/lint') {
     appendChat('system', '正在执行健康检查...');
     const wikiFiles = wiki.listWikiFiles();
     const rawFiles = wiki.listRawFiles();
     appendChat('system', `Wiki页面: ${wikiFiles.length} | 原始资料: ${rawFiles.length}`);
+    return;
+  }
+
+  if (text === '/reindex') {
+    const wikiFiles = wiki.listWikiFiles();
+    const contentFiles = wikiFiles.filter(f => !['index.md', 'log.md', 'overview.md'].includes(f.name) && f.category !== 'domains');
+    if (contentFiles.length === 0) {
+      appendChat('system', 'Wiki 中没有内容页面，无需重建索引');
+      return;
+    }
+
+    appendChat('system', `⏳ 正在重建索引（${contentFiles.length} 个页面）...`);
+    updateStatus(' ⏳ 重建索引中...');
+    screen.render();
+
+    const domainGroups = {};
+    for (const f of contentFiles) {
+      const content = wiki.readFile(f.path);
+      if (!content) continue;
+      const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
+      const fm = fmMatch ? fmMatch[1] : '';
+      const domainsMatch = fm.match(/domains:\s*\[([^\]]*)\]/);
+      const domains = domainsMatch
+        ? domainsMatch[1].split(',').map(d => d.trim().replace(/['"]/g, '')).filter(d => d)
+        : ['uncategorized'];
+      for (const domain of domains) {
+        if (!domainGroups[domain]) domainGroups[domain] = [];
+        domainGroups[domain].push({ path: f.path, fm: fm.replace(/\n/g, ' | ') });
+      }
+    }
+
+    const domainNames = Object.keys(domainGroups);
+    let totalFiles = 0;
+
+    for (let i = 0; i < domainNames.length; i++) {
+      const domain = domainNames[i];
+      const pages = domainGroups[domain];
+      appendChat('system', `  📂 处理领域 ${i + 1}/${domainNames.length}: ${domain}（${pages.length} 个页面）...`);
+      screen.render();
+
+      const pagesInfo = pages.map(p => `- ${p.path}: ${p.fm}`).join('\n');
+      const messages = [
+        { role: 'system', content: wiki.getSystemPrompt() },
+        {
+          role: 'user', content: `请为领域"${domain}"创建或更新索引页 wiki/domains/${domain}.md。
+
+该领域包含以下页面：
+${pagesInfo}
+
+请输出完整的领域索引页，包含：概述、核心概念列表、重要实体列表、关键来源列表。
+如果该领域应该是某个更大领域的子领域，请在 frontmatter 中设置 parent 字段。
+
+只输出这一个文件，用 <<<FILE:路径>>> 格式。` },
+      ];
+
+      try {
+        let response = '';
+        appendChat('ai', '');
+        await llm.chatStream(messages, (chunk) => {
+          response += chunk;
+          const displayText = response.replace(/<<<FILE:.*?>>>[\s\S]*?<<<END>>>/g, '[文件操作]');
+          chatMessages[chatMessages.length - 1] = `{yellow-fg}AI:{/yellow-fg} ${displayText}`;
+          chatBox.setContent(chatMessages.join('\n'));
+          chatBox.setScrollPerc(100);
+          screen.render();
+        });
+        const files = parseFileOutputs(response);
+        if (files.length > 0) {
+          for (const f of files) wiki.writeFile(f.path, f.content);
+          totalFiles += files.length;
+        }
+      } catch (err) {
+        appendChat('system', `  ⚠ 领域 ${domain} 处理失败: ${err.message}`);
+      }
+    }
+
+    appendChat('system', `  📋 生成 index.md 和 overview.md...`);
+    screen.render();
+
+    const domainFiles = wiki.listWikiFiles().filter(f => f.category === 'domains' && f.name !== '_meta.json');
+    const domainList = domainFiles.map(f => {
+      const content = wiki.readFile(f.path);
+      const fmMatch = content ? content.match(/^---\n([\s\S]*?)\n---/) : null;
+      const fm = fmMatch ? fmMatch[1] : '';
+      return `- ${f.path}: ${fm.replace(/\n/g, ' | ')}`;
+    }).join('\n');
+
+    const finalMessages = [
+      { role: 'system', content: wiki.getSystemPrompt() },
+      {
+        role: 'user', content: `请根据以下领域索引页信息，生成 wiki/index.md 和 wiki/overview.md。
+
+当前所有领域索引页：
+${domainList}
+
+统计：共 ${contentFiles.length} 个内容页面，${domainNames.length} 个领域。
+
+要求：
+1. wiki/index.md 只列顶层领域（没有 parent 的领域）目录和统计数字
+2. wiki/overview.md 概述整个知识库的内容全貌
+
+两个文件都必须输出，用 <<<FILE:路径>>> 格式。` },
+    ];
+
+    try {
+      let response = '';
+      appendChat('ai', '');
+      await llm.chatStream(finalMessages, (chunk) => {
+        response += chunk;
+        const displayText = response.replace(/<<<FILE:.*?>>>[\s\S]*?<<<END>>>/g, '[文件操作]');
+        chatMessages[chatMessages.length - 1] = `{yellow-fg}AI:{/yellow-fg} ${displayText}`;
+        chatBox.setContent(chatMessages.join('\n'));
+        chatBox.setScrollPerc(100);
+        screen.render();
+      });
+      const files = parseFileOutputs(response);
+      if (files.length > 0) {
+        for (const f of files) wiki.writeFile(f.path, f.content);
+        totalFiles += files.length;
+      }
+    } catch (err) {
+      appendChat('system', `  ⚠ index/overview 生成失败: ${err.message}`);
+    }
+
+    appendChat('system', `✓ 索引重建完成，共更新 ${totalFiles} 个文件`);
+    updateStatus(getDefaultStatus());
     return;
   }
 
@@ -363,6 +553,8 @@ async function handleUserInput(text) {
       '  /model [名称]   - 查看/切换模型',
       '  /retry          - 重试失败的摄入段落',
       '  /continue       - 跳过失败段落继续摄入',
+      '  /reindex        - 重建索引层级结构',
+      '  /prune          - 清理不可达的领域索引页',
       '  /lint           - 健康检查',
       '  /exit /quit /bye - 退出程序',
       '  /help           - 显示帮助',
@@ -378,32 +570,188 @@ async function handleUserInput(text) {
   updateStatus(' ⏳ 模型思考中...');
   appendChat('ai', '思考中...');
 
-  const messages = [
-    { role: 'system', content: wiki.getSystemPrompt() },
-    ...chatHistory.slice(-10),
-    { role: 'user', content: text },
-  ];
-
   try {
-    let response = '';
-    await llm.chatStream(messages, (chunk) => {
-      response += chunk;
-      const displayText = response.replace(/<<<FILE:.*?>>>[\s\S]*?<<<END>>>/g, '[文件操作]');
-      chatMessages[chatMessages.length - 1] = `{yellow-fg}AI:{/yellow-fg} ${displayText}`;
-      chatBox.setContent(chatMessages.join('\n'));
-      chatBox.setScrollPerc(100);
-      screen.render();
-    });
+    updateStatus(' ⏳ 提取关键词...');
+    let keywords = [];
+    const extractMessages = [
+      { role: 'system', content: '你是一个关键词提取助手。从用户的问题中提取用于搜索知识库的关键词（概念名、实体名、技术术语等）。只输出 JSON 数组格式的关键词列表，不要输出其他内容。例如：["注意力机制", "transformer", "RLHF"]' },
+      { role: 'user', content: text },
+    ];
 
-    chatHistory.push({ role: 'user', content: text });
-    chatHistory.push({ role: 'assistant', content: response });
+    let extractResponse = '';
+    await llm.chatStream(extractMessages, (chunk) => { extractResponse += chunk; });
 
-    const files = parseFileOutputs(response);
-    if (files.length > 0) {
-      for (const f of files) {
-        wiki.writeFile(f.path, f.content);
+    try {
+      const jsonMatch = extractResponse.match(/\[[\s\S]*?\]/);
+      if (jsonMatch) keywords = JSON.parse(jsonMatch[0]);
+    } catch { }
+
+    let searchContext = '';
+    if (keywords.length > 0) {
+      const results = wiki.searchWiki(keywords);
+      if (results.length > 0) {
+        appendChat('system', `  🔍 搜索到 ${results.length} 个相关页面`);
+        screen.render();
+        for (const r of results.slice(0, 5)) {
+          const content = wiki.readFile(r.path);
+          if (content) {
+            searchContext += `\n\n--- ${r.path} (${r.title || r.path}) ---\n${content}`;
+          }
+        }
       }
-      appendChat('system', `✓ 已更新 ${files.length} 个文件`);
+    }
+
+    const MAX_AGENT_ROUNDS = 5;
+    const queryPrompt = wiki.getSystemPrompt('query');
+
+    if (searchContext) {
+      const messages = [
+        { role: 'system', content: queryPrompt },
+        ...chatHistory.slice(-10),
+        { role: 'user', content: `${text}\n\n以下是从知识库中检索到的相关内容：${searchContext}\n\n请基于以上内容回答问题。如果信息不足，可以使用 <<<READ:路径>>> 请求读取更多文件。` },
+      ];
+
+      updateStatus(' ⏳ 生成回答...');
+      let finalResponse = '';
+      let scratchpad = '';
+      let round = 0;
+
+      while (round < MAX_AGENT_ROUNDS) {
+        round++;
+        let response = '';
+        await llm.chatStream(messages, (chunk) => {
+          response += chunk;
+          const displayText = response
+            .replace(/<<<READ:.*?>>>/g, '[检索中...]')
+            .replace(/<<<NOTE:[\s\S]*?>>>$/g, '')
+            .replace(/<<<FILE:.*?>>>[\s\S]*?<<<END>>>/g, '[文件操作]');
+          chatMessages[chatMessages.length - 1] = `{yellow-fg}AI:{/yellow-fg} ${displayText}`;
+          chatBox.setContent(chatMessages.join('\n'));
+          chatBox.setScrollPerc(100);
+          screen.render();
+        });
+
+        const readRegex = /<<<READ:(.*?)>>>/g;
+        let readMatch;
+        const readRequests = [];
+        while ((readMatch = readRegex.exec(response)) !== null) {
+          readRequests.push(readMatch[1].trim());
+        }
+
+        if (readRequests.length === 0) {
+          finalResponse = response;
+          break;
+        }
+
+        const noteMatch = response.match(/<<<NOTE:([\s\S]*?)>>>/);
+        if (noteMatch) {
+          scratchpad += '\n' + noteMatch[1].trim();
+        }
+
+        appendChat('system', `  🔍 探索性检索 ${readRequests.length} 个文件...`);
+        screen.render();
+
+        let fileContents = '';
+        for (const filePath of readRequests.slice(0, 3)) {
+          const content = wiki.readFile(filePath);
+          if (content) {
+            fileContents += `\n\n--- ${filePath} ---\n${content}`;
+          } else {
+            fileContents += `\n\n--- ${filePath} ---\n[文件不存在]`;
+          }
+        }
+
+        messages.length = 0;
+        messages.push(
+          { role: 'system', content: queryPrompt },
+          { role: 'user', content: `用户问题：${text}\n\n${scratchpad ? `已知信息（笔记）：\n${scratchpad}\n\n` : ''}以下是本轮读取的文件内容：${fileContents}\n\n请根据以上信息回答问题，或使用 <<<READ:路径>>> 继续检索。如果从文件中发现了有用信息，请用 <<<NOTE:要点>>> 记录关键发现。` }
+        );
+      }
+
+      chatHistory.push({ role: 'user', content: text });
+      chatHistory.push({ role: 'assistant', content: finalResponse });
+
+      const files = parseFileOutputs(finalResponse);
+      if (files.length > 0) {
+        for (const f of files) {
+          wiki.writeFile(f.path, f.content);
+        }
+        appendChat('system', `✓ 已更新 ${files.length} 个文件`);
+      }
+    } else {
+      const messages = [
+        { role: 'system', content: queryPrompt },
+        ...chatHistory.slice(-10),
+        { role: 'user', content: text },
+      ];
+
+      updateStatus(' ⏳ 探索性检索...');
+      let finalResponse = '';
+      let scratchpad = '';
+      let round = 0;
+
+      while (round < MAX_AGENT_ROUNDS) {
+        round++;
+        let response = '';
+        await llm.chatStream(messages, (chunk) => {
+          response += chunk;
+          const displayText = response
+            .replace(/<<<READ:.*?>>>/g, '[检索中...]')
+            .replace(/<<<NOTE:[\s\S]*?>>>$/g, '')
+            .replace(/<<<FILE:.*?>>>[\s\S]*?<<<END>>>/g, '[文件操作]');
+          chatMessages[chatMessages.length - 1] = `{yellow-fg}AI:{/yellow-fg} ${displayText}`;
+          chatBox.setContent(chatMessages.join('\n'));
+          chatBox.setScrollPerc(100);
+          screen.render();
+        });
+
+        const readRegex = /<<<READ:(.*?)>>>/g;
+        let readMatch;
+        const readRequests = [];
+        while ((readMatch = readRegex.exec(response)) !== null) {
+          readRequests.push(readMatch[1].trim());
+        }
+
+        if (readRequests.length === 0) {
+          finalResponse = response;
+          break;
+        }
+
+        const noteMatch = response.match(/<<<NOTE:([\s\S]*?)>>>/);
+        if (noteMatch) {
+          scratchpad += '\n' + noteMatch[1].trim();
+        }
+
+        appendChat('system', `  🔍 探索性检索 ${readRequests.length} 个文件 (第${round}轮)...`);
+        screen.render();
+
+        let fileContents = '';
+        for (const filePath of readRequests.slice(0, 3)) {
+          const content = wiki.readFile(filePath);
+          if (content) {
+            fileContents += `\n\n--- ${filePath} ---\n${content}`;
+          } else {
+            fileContents += `\n\n--- ${filePath} ---\n[文件不存在]`;
+          }
+        }
+
+        messages.length = 0;
+        messages.push(
+          { role: 'system', content: queryPrompt },
+          { role: 'user', content: `用户问题：${text}\n\n${scratchpad ? `已知信息（笔记）：\n${scratchpad}\n\n` : ''}以下是本轮读取的文件内容：${fileContents}\n\n请根据以上信息回答问题，或使用 <<<READ:路径>>> 继续检索。如果从文件中发现了有用信息，请用 <<<NOTE:要点>>> 记录关键发现。` }
+        );
+      }
+
+      chatHistory.push({ role: 'user', content: text });
+      chatHistory.push({ role: 'assistant', content: finalResponse });
+
+      const files = parseFileOutputs(finalResponse);
+      if (files.length > 0) {
+        for (const f of files) {
+          wiki.writeFile(f.path, f.content);
+        }
+        appendChat('system', `✓ 已更新 ${files.length} 个文件`);
+      }
     }
   } catch (err) {
     chatMessages[chatMessages.length - 1] = `{red-fg}错误:{/red-fg} ${err.message}`;
@@ -513,7 +861,7 @@ async function autoIngestFile(fileName, startFromSegment = 0, skipSegments = [])
 
         let instruction;
         if (isFirst) {
-          instruction = `你正在逐段阅读文档"${fileName}"（共${totalSegments}段），像做读书笔记一样边读边记录。
+          instruction = `你正在逐段阅读文档"${fileName}"（共${totalSegments}段），像做读书笔记一样边读边记录。随着阅读推进，知识结构会逐渐演变。
 
 这是第 1 段：
 
@@ -523,20 +871,21 @@ ${segments[i]}
 1. 在 wiki/sources/ 创建来源摘要页面（先写已读到的部分，后续段落会补充）
 2. 提取其中的概念，为每个概念创建 wiki/concepts/ 页面
 3. 提取其中的实体，为每个实体创建 wiki/entities/ 页面
-4. 识别或创建领域，更新 wiki/domains/ 索引页
+4. 识别或创建领域，创建/更新 wiki/domains/ 索引页（列出当前已知的概念和实体）
+5. 更新 wiki/index.md（只列顶层领域目录和统计数字，子领域不列入）
 
-每个文件用 <<<FILE:路径>>> 格式输出。暂不更新 index.md 和 overview.md（最后一段统一更新）。`;
+每个文件用 <<<FILE:路径>>> 格式输出。`;
         } else if (isLast) {
           instruction = `继续阅读文档"${fileName}"，这是最后一段（第 ${i + 1}/${totalSegments} 段）：
 
 ${segments[i]}
 
 请基于这段内容：
-1. 补充/更新 wiki/sources/ 来源摘要页面
+1. 补充/更新 wiki/sources/ 来源摘要页面（完整版）
 2. 提取新概念，创建新的 wiki/concepts/ 页面；如果已有概念需要补充，输出更新后的完整页面
 3. 提取新实体，创建新的 wiki/entities/ 页面；如果已有实体需要补充，输出更新后的完整页面
-4. 更新领域索引页
-5. 更新 wiki/index.md（包含本次摄入的所有条目）
+4. 更新领域索引页（添加新条目，调整领域结构如有必要）
+5. 更新 wiki/index.md（最终版顶层领域目录和统计数字，子领域不列入）
 6. 更新 wiki/overview.md
 7. 追加 wiki/log.md 操作记录
 
@@ -550,9 +899,10 @@ ${segments[i]}
 1. 如果来源摘要需要补充，输出更新后的 wiki/sources/ 页面
 2. 提取新概念，创建新的 wiki/concepts/ 页面；如果已有概念需要补充，输出更新后的完整页面
 3. 提取新实体，创建新的 wiki/entities/ 页面；如果已有实体需要补充，输出更新后的完整页面
-4. 更新领域索引页（如有新增）
+4. 更新领域索引页（添加新条目；如果发现新的子领域或领域需要拆分/合并，直接调整）
+5. 更新 wiki/index.md（只列顶层领域目录和统计数字，子领域不列入）
 
-每个文件用 <<<FILE:路径>>> 格式输出。暂不更新 index.md 和 overview.md。
+每个文件用 <<<FILE:路径>>> 格式输出。
 如果这段没有新的概念或实体需要记录，可以只输出简短说明。`;
         }
 
@@ -622,7 +972,7 @@ ${segments[i]}
         try {
           const messages = [
             { role: 'system', content: wiki.getSystemPrompt() },
-            { role: 'user', content: `请执行摄入操作。以下是需要处理的原始资料：\n\n--- 原始资料: ${fileName} ---\n${content}\n\n请严格按照工作流完成所有步骤：创建来源摘要、更新实体/概念页面、更新 index.md、更新 overview.md、追加 log.md。每个需要创建或修改的文件都必须用 <<<FILE:路径>>> 格式输出。请确保完整摘要文档内容，不要遗漏重要信息。` },
+            { role: 'user', content: `请执行摄入操作。以下是需要处理的原始资料：\n\n--- 原始资料: ${fileName} ---\n${content}\n\n请严格按照工作流完成所有步骤：创建来源摘要、更新实体/概念页面、更新领域索引页、更新 index.md（只列领域目录）、更新 overview.md、追加 log.md。每个需要创建或修改的文件都必须用 <<<FILE:路径>>> 格式输出。请确保完整摘要文档内容，不要遗漏重要信息。` },
           ];
 
           let response = '';
@@ -763,6 +1113,8 @@ const COMMANDS = [
   { cmd: '/model', desc: '切换模型' },
   { cmd: '/retry', desc: '重试失败段落' },
   { cmd: '/continue', desc: '跳过继续' },
+  { cmd: '/reindex', desc: '重建索引' },
+  { cmd: '/prune', desc: '清理不可达领域' },
   { cmd: '/lint', desc: '健康检查' },
   { cmd: '/help', desc: '显示帮助' },
   { cmd: '/bye', desc: '退出程序' },
@@ -770,6 +1122,7 @@ const COMMANDS = [
 
 function showCommandList() {
   if (commandListBox) return;
+  inputBox.cancel();
   commandListBox = blessed.list({
     parent: screen,
     bottom: '15%',
@@ -789,15 +1142,15 @@ function showCommandList() {
   });
   commandListBox.on('select', (item, idx) => {
     const selected = COMMANDS[idx];
-    inputBox.setValue(selected.cmd + ' ');
     hideCommandList();
-    inputBox.focus();
+    inputBox.setValue(selected.cmd);
     screen.render();
+    inputBox.readInput();
   });
   commandListBox.key(['escape'], () => {
     hideCommandList();
-    inputBox.focus();
     screen.render();
+    inputBox.readInput();
   });
   commandListBox.focus();
   screen.render();
@@ -834,7 +1187,7 @@ inputBox.on('keypress', (ch, key) => {
   }
 });
 
-inputBox.key('enter', () => {
+inputBox.key('enter', async () => {
   const text = inputBox.getValue();
   inputBox.clearValue();
   hideCommandList();
@@ -844,7 +1197,8 @@ inputBox.key('enter', () => {
     if (inputHistory.length > 50) inputHistory.pop();
     historyIndex = -1;
   }
-  handleUserInput(text);
+  await handleUserInput(text);
+  inputBox.readInput();
 });
 
 screen.key(['C-c'], () => process.exit(0));
@@ -865,5 +1219,5 @@ if (pendingProgress) {
     appendChat('system', '  输入 /retry 从断点继续');
   }
 }
-inputBox.focus();
+inputBox.readInput();
 screen.render();
