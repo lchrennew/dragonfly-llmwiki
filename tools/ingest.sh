@@ -12,6 +12,7 @@ if [ $# -eq 0 ]; then
     echo "用法: $0 <source_file> [source_file2 ...]"
     echo ""
     echo "将源文件复制到 raw/ 目录，准备让 LLM 进行摄入处理。"
+    echo "系统会自动检测文件是否有变化，只处理新增或修改的文件。"
     echo ""
     echo "支持的文件格式: .md, .txt, .pdf, .html"
     exit 1
@@ -42,3 +43,5 @@ done
 echo ""
 echo "资料已就绪。请告诉 LLM 执行摄入操作："
 echo "  \"请摄入 raw/ 中的新资料\""
+echo ""
+echo "提示: LLM 会自动检测文件变化，只处理有更新的文件。"

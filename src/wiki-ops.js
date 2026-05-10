@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { createRequire } from 'module';
+import { checkChangedFiles, updateMultipleHashes } from './hash-tracker.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const ROOT = path.join(__dirname, '..');
@@ -103,6 +104,31 @@ export function listRawFiles() {
     .map(f => ({ name: f, path: path.join('raw', f) }));
 }
 
+export function listChangedRawFiles() {
+  const allFiles = listRawFiles();
+  if (allFiles.length === 0) return { changed: [], unchanged: [], notFound: [] };
+
+  const filePaths = allFiles.map(f => f.path);
+  const result = checkChangedFiles(filePaths);
+
+  return {
+    changed: result.changed.map(item => ({
+      name: path.basename(item.path),
+      path: item.path,
+      reason: item.reason
+    })),
+    unchanged: result.unchanged.map(p => ({
+      name: path.basename(p),
+      path: p
+    })),
+    notFound: result.notFound
+  };
+}
+
+export function markFilesAsProcessed(relPaths) {
+  return updateMultipleHashes(relPaths);
+}
+
 export function listWikiFiles() {
   if (!fs.existsSync(WIKI_DIR)) return [];
   const results = [];
@@ -178,15 +204,40 @@ ${overview}
 你的工作：
 1. 当用户要求摄入资料时，你必须完成以下所有步骤：
    a. 阅读原始文档，在 wiki/sources/ 创建来源摘要页面
-   b. 识别并更新相关的实体页面（wiki/entities/）
-   c. 识别并更新相关的概念页面（wiki/concepts/）
-   d. 更新 wiki/index.md 添加新条目
-   e. 更新 wiki/overview.md 反映新增内容对整体知识库的影响
-   f. 在 wiki/log.md 追加操作记录
+   b. **识别或创建领域**：
+      - 判断文档所属的领域（如：deep-learning, software-engineering）
+      - 如果是新领域，创建领域索引页到 wiki/domains/
+      - 如果领域已存在，准备更新领域索引页
+      - 在领域索引页中列出该领域的核心概念、重要实体、关键来源
+   c. **系统化提取所有概念**：
+      - 识别文档中的**每一个**重要概念（理论、方法、模式、技术、原则等）
+      - 为**每个**概念创建独立的页面到 wiki/concepts/
+      - 在概念页面的 frontmatter 中添加 domains 字段（可多个领域）
+      - 不要把多个概念合并到一个页面
+      - 概念页面必须包含：定义、核心要点、应用场景、相关概念链接、参考来源
+   d. **系统化提取所有实体**：
+      - 识别文档中的**每一个**重要实体（人物、组织、产品、项目等）
+      - 为**每个**实体创建独立的页面到 wiki/entities/
+      - 在实体页面的 frontmatter 中添加 domains 字段（可多个领域）
+      - 实体页面必须包含：基本信息、背景、相关概念、来源引用
+   e. **更新领域索引页**：
+      - 将新增的概念和实体添加到对应的领域索引页
+      - 更新领域之间的父子关系（如果需要）
+   f. 更新 wiki/index.md 添加所有新条目（按领域组织）
+   g. 更新 wiki/overview.md 反映新增内容对整体知识库的影响
+   h. 在 wiki/log.md 追加操作记录
 2. 当用户提问时，基于 Wiki 内容综合回答
-3. 当用户要求健康检查时，分析 Wiki 状态并给出建议
+3. 当用户要求健康检查时，分析 Wiki 状态并给出建议，包括：
+   - 检查领域是否需要细分（概念数>20）
+   - 检查领域是否需要合并（大量重叠）
+   - 检查领域命名是否一致
 
-重要：摄入资料时，你必须输出所有需要创建或修改的文件，包括 overview.md。每个文件使用以下格式：
+重要提醒：
+- 摄入资料时，必须为文档中的**每个**概念创建独立页面
+- 即使一个文档包含10个概念，也要创建10个独立的概念页面
+- 概念之间通过 [[链接]] 建立关联，而不是合并到一个页面
+- 你必须输出所有需要创建或修改的文件，包括 overview.md
+- 每个文件使用以下格式：
 <<<FILE:相对路径>>>
 文件内容
 <<<END>>>`;

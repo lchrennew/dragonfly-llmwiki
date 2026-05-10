@@ -16,6 +16,12 @@ node_modules/
 # Environment
 .env
 
+# File hash tracking database
+.wiki-hashes.json
+
+# User config (last import dir, etc.)
+.wiki-config.json
+
 # Obsidian
 .obsidian/
 .trash/
