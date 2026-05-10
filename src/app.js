@@ -1060,6 +1060,22 @@ ${brief ? extractRules : `请基于这段内容：
                     totalFiles += indexFiles.length;
                   }
                 } catch { }
+
+                if (isLast) {
+                  const overviewMessages = [
+                    { role: 'system', content: wiki.getSystemPrompt() },
+                    { role: 'user', content: `文档"${fileName}"摄入完成。请根据当前知识库状态更新 wiki/overview.md，概述整个知识库的内容全貌。只输出 wiki/overview.md，用 <<<FILE:路径>>> 格式。` },
+                  ];
+                  try {
+                    let ovResponse = '';
+                    await llm.chatStream(overviewMessages, (chunk) => { ovResponse += chunk; });
+                    const ovFiles = parseFileOutputs(ovResponse);
+                    if (ovFiles.length > 0) {
+                      for (const f of ovFiles) wiki.writeFile(f.path, f.content);
+                      totalFiles += ovFiles.length;
+                    }
+                  } catch { }
+                }
               }
             } else {
               appendChat('system', `  ✓ 第 ${i + 1} 段无新增内容`);
