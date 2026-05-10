@@ -190,6 +190,9 @@ export function getSystemPrompt() {
   const overviewPath = path.join(WIKI_DIR, 'overview.md');
   const overview = fs.existsSync(overviewPath) ? fs.readFileSync(overviewPath, 'utf-8') : '';
 
+  const wikiFiles = listWikiFiles();
+  const fileList = wikiFiles.map(f => `- ${f.path}`).join('\n');
+
   return `你是一个 LLM Wiki 知识库助手。你的职责是帮助用户管理和维护一个结构化的个人知识库。
 
 以下是 Wiki 的 Schema 配置：
@@ -200,6 +203,9 @@ ${index}
 
 以下是当前 Wiki 总览（overview.md）：
 ${overview}
+
+以下是当前 Wiki 中实际存在的所有文件：
+${fileList}
 
 你的工作：
 1. 当用户要求摄入资料时，你必须完成以下所有步骤：
@@ -226,7 +232,7 @@ ${overview}
    f. 更新 wiki/index.md 添加所有新条目（按领域组织）
    g. 更新 wiki/overview.md 反映新增内容对整体知识库的影响
    h. 在 wiki/log.md 追加操作记录
-2. 当用户提问时，基于 Wiki 内容综合回答
+2. 当用户提问时，基于 Wiki 内容综合回答。你可以根据文件列表中的路径来判断知识库中有哪些内容，必要时告知用户具体有哪些相关页面。
 3. 当用户要求健康检查时，分析 Wiki 状态并给出建议，包括：
    - 检查领域是否需要细分（概念数>20）
    - 检查领域是否需要合并（大量重叠）

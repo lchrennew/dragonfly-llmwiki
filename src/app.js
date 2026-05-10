@@ -816,7 +816,7 @@ inputBox.on('keypress', (ch, key) => {
     if (historyIndex < inputHistory.length - 1) historyIndex++;
     inputBox.setValue(inputHistory[historyIndex]);
     screen.render();
-    return;
+    return false;
   }
   if (key.name === 'down') {
     if (historyIndex > 0) {
@@ -827,7 +827,7 @@ inputBox.on('keypress', (ch, key) => {
       inputBox.setValue('');
     }
     screen.render();
-    return;
+    return false;
   }
   if (ch === '/' && inputBox.getValue() === '') {
     process.nextTick(() => showCommandList());
