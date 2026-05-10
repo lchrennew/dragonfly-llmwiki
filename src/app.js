@@ -38,12 +38,11 @@ function setLastImportDir(dir) {
 
 function saveIngestProgress(fileName, completedSegments, totalSegments, opts = {}) {
   const config = loadConfig();
-  const existing = config.ingestProgress || {};
-  config.ingestProgress = {
-    fileName,
+  if (!config.ingestProgress) config.ingestProgress = {};
+  config.ingestProgress[fileName] = {
     completedSegments,
     totalSegments,
-    failedSegments: opts.failedSegments || existing.failedSegments || [],
+    failedSegments: opts.failedSegments || (config.ingestProgress[fileName] || {}).failedSegments || [],
     paused: opts.paused || false,
     pausedAt: opts.paused ? (opts.pausedAt || completedSegments) : null,
     updatedAt: new Date().toISOString(),
@@ -51,14 +50,27 @@ function saveIngestProgress(fileName, completedSegments, totalSegments, opts = {
   saveConfig(config);
 }
 
-function getIngestProgress() {
+function getIngestProgress(fileName) {
   const config = loadConfig();
-  return config.ingestProgress || null;
+  if (!config.ingestProgress) return null;
+  if (config.ingestProgress.fileName) {
+    const old = config.ingestProgress;
+    config.ingestProgress = { [old.fileName]: { completedSegments: old.completedSegments, totalSegments: old.totalSegments, failedSegments: old.failedSegments || [], paused: old.paused || false, pausedAt: old.pausedAt || null, updatedAt: old.updatedAt } };
+    saveConfig(config);
+  }
+  if (fileName) return config.ingestProgress[fileName] || null;
+  return config.ingestProgress;
 }
 
-function clearIngestProgress() {
+function clearIngestProgress(fileName) {
   const config = loadConfig();
-  delete config.ingestProgress;
+  if (!config.ingestProgress) return;
+  if (fileName) {
+    delete config.ingestProgress[fileName];
+    if (Object.keys(config.ingestProgress).length === 0) delete config.ingestProgress;
+  } else {
+    delete config.ingestProgress;
+  }
   saveConfig(config);
 }
 
@@ -192,6 +204,23 @@ async function handleUserInput(text) {
 
   if (text === '/exit' || text === '/quit' || text === '/bye') {
     process.exit(0);
+  }
+
+  if (text === '/prune --all') {
+    const wikiFiles = wiki.listWikiFiles();
+    let deleted = 0;
+    for (const f of wikiFiles) {
+      const fullPath = path.join(wiki.ROOT, f.path);
+      if (fs.existsSync(fullPath)) {
+        fs.unlinkSync(fullPath);
+        deleted++;
+      }
+    }
+    const hashPath = path.join(wiki.ROOT, '.wiki-hashes.json');
+    if (fs.existsSync(hashPath)) fs.writeFileSync(hashPath, '{}', 'utf-8');
+    clearIngestProgress();
+    appendChat('system', `✓ 已清空 Wiki（删除了 ${deleted} 个文件），哈希和进度已重置`);
+    return;
   }
 
   if (text === '/prune') {
@@ -431,9 +460,11 @@ ${domainList}
   }
 
   if (text.startsWith('/ingest!')) {
-    const targetName = text.replace('/ingest!', '').trim();
+    const args = text.replace('/ingest!', '').trim();
+    const brief = args.includes('--brief');
+    const targetName = args.replace('--brief', '').trim();
     if (!targetName) {
-      appendChat('system', '用法: /ingest! <文件名> - 强制重新摄入指定文件');
+      appendChat('system', '用法: /ingest! <文件名> [--brief] - 强制重新摄入指定文件');
       return;
     }
     const rawFiles = wiki.listRawFiles();
@@ -443,15 +474,17 @@ ${domainList}
       return;
     }
     updateStatus(' ⏳ 强制摄入中...');
-    appendChat('system', `⏳ 强制摄入: ${targetName}...`);
+    appendChat('system', `⏳ 强制摄入${brief ? '(精简)' : ''}: ${targetName}...`);
     screen.render();
-    await autoIngestFile(targetName);
+    await autoIngestFile(targetName, 0, [], { brief });
     wiki.markFilesAsProcessed([target.path]);
     return;
   }
 
   if (text.startsWith('/ingest')) {
-    const targetName = text.replace('/ingest', '').trim();
+    const args = text.replace('/ingest', '').trim();
+    const brief = args.includes('--brief');
+    const targetName = args.replace('--brief', '').trim();
     const { changed, unchanged } = wiki.listChangedRawFiles();
 
     if (targetName) {
@@ -465,9 +498,9 @@ ${domainList}
         return;
       }
       updateStatus(' ⏳ 摄入中...');
-      appendChat('system', `⏳ 开始摄入: ${targetName}...`);
+      appendChat('system', `⏳ 开始摄入${brief ? '(精简)' : ''}: ${targetName}...`);
       screen.render();
-      await autoIngestFile(targetName);
+      await autoIngestFile(targetName, 0, [], { brief });
       const relPath = `raw/${targetName}`;
       wiki.markFilesAsProcessed([relPath]);
       return;
@@ -486,60 +519,131 @@ ${domainList}
       screen.render();
       await autoIngestFile(f.name);
       wiki.markFilesAsProcessed([f.path]);
-      const progress = getIngestProgress();
+      const progress = getIngestProgress(f.name);
       if (progress && progress.paused) {
-        appendChat('system', `摄入暂停，剩余文件将在恢复后继续`);
-        return;
+        appendChat('system', `${f.name} 摄入暂停，继续处理下一个文件...`);
       }
     }
     updateStatus(getDefaultStatus());
     return;
   }
 
-  if (text === '/retry') {
-    const progress = getIngestProgress();
-    if (!progress) {
+  if (text.startsWith('/retry')) {
+    const targetFile = text.replace('/retry', '').trim();
+    const allProgress = getIngestProgress();
+    if (!allProgress || Object.keys(allProgress).length === 0) {
       appendChat('system', '没有需要恢复的摄入任务');
+      return;
+    }
+
+    if (!targetFile) {
+      const files = Object.keys(allProgress);
+      if (files.length === 1) {
+        const fileName = files[0];
+        const progress = allProgress[fileName];
+        updateStatus(' ⏳ 重试摄入中...');
+        screen.render();
+        if (progress.failedSegments && progress.failedSegments.length > 0 && progress.completedSegments >= progress.totalSegments) {
+          appendChat('system', `重试 ${fileName} 的 ${progress.failedSegments.length} 个失败段落`);
+          const failedList = [...progress.failedSegments];
+          clearIngestProgress(fileName);
+          for (const segIdx of failedList) {
+            await autoIngestFile(fileName, segIdx, []);
+            const p = getIngestProgress(fileName);
+            if (p && p.paused) return;
+          }
+          clearIngestProgress(fileName);
+          appendChat('system', '✓ 所有失败段落重试完成');
+        } else if (progress.paused && progress.pausedAt !== null) {
+          appendChat('system', `重试 ${fileName} 第 ${progress.pausedAt + 1}/${progress.totalSegments} 段...`);
+          const failedSegments = (progress.failedSegments || []).filter(s => s !== progress.pausedAt);
+          saveIngestProgress(fileName, progress.pausedAt, progress.totalSegments, { failedSegments });
+          await autoIngestFile(fileName, progress.pausedAt, failedSegments);
+        } else {
+          appendChat('system', `恢复摄入: ${fileName}（从第 ${progress.completedSegments + 1}/${progress.totalSegments} 段继续）`);
+          await autoIngestFile(fileName, progress.completedSegments, progress.failedSegments || []);
+        }
+      } else {
+        appendChat('system', `有 ${files.length} 个文件有未完成的摄入任务：`);
+        for (const f of files) {
+          const p = allProgress[f];
+          const status = p.paused ? '暂停' : `${p.completedSegments}/${p.totalSegments}`;
+          appendChat('system', `  - ${f} (${status})`);
+        }
+        appendChat('system', '请指定文件: /retry <文件名>');
+      }
+      return;
+    }
+
+    const progress = allProgress[targetFile];
+    if (!progress) {
+      appendChat('system', `没有找到 ${targetFile} 的摄入进度`);
       return;
     }
     updateStatus(' ⏳ 重试摄入中...');
     screen.render();
-    if (progress.paused && progress.failedSegments && progress.failedSegments.length > 0 && progress.completedSegments >= progress.totalSegments) {
-      appendChat('system', `重试 ${progress.failedSegments.length} 个失败段落: [${progress.failedSegments.map(s => s + 1).join(', ')}]`);
+    if (progress.failedSegments && progress.failedSegments.length > 0 && progress.completedSegments >= progress.totalSegments) {
+      appendChat('system', `重试 ${targetFile} 的 ${progress.failedSegments.length} 个失败段落`);
       const failedList = [...progress.failedSegments];
-      clearIngestProgress();
+      clearIngestProgress(targetFile);
       for (const segIdx of failedList) {
-        await autoIngestFile(progress.fileName, segIdx, []);
-        const newProgress = getIngestProgress();
-        if (newProgress && newProgress.paused) return;
+        await autoIngestFile(targetFile, segIdx, []);
+        const p = getIngestProgress(targetFile);
+        if (p && p.paused) return;
       }
-      clearIngestProgress();
+      clearIngestProgress(targetFile);
       appendChat('system', '✓ 所有失败段落重试完成');
     } else if (progress.paused && progress.pausedAt !== null) {
-      appendChat('system', `重试第 ${progress.pausedAt + 1}/${progress.totalSegments} 段...`);
+      appendChat('system', `重试 ${targetFile} 第 ${progress.pausedAt + 1}/${progress.totalSegments} 段...`);
       const failedSegments = (progress.failedSegments || []).filter(s => s !== progress.pausedAt);
-      saveIngestProgress(progress.fileName, progress.pausedAt, progress.totalSegments, { failedSegments });
-      await autoIngestFile(progress.fileName, progress.pausedAt, failedSegments);
+      saveIngestProgress(targetFile, progress.pausedAt, progress.totalSegments, { failedSegments });
+      await autoIngestFile(targetFile, progress.pausedAt, failedSegments);
     } else {
-      appendChat('system', `恢复摄入: ${progress.fileName}（从第 ${progress.completedSegments + 1}/${progress.totalSegments} 段继续）`);
-      await autoIngestFile(progress.fileName, progress.completedSegments, progress.failedSegments || []);
+      appendChat('system', `恢复摄入: ${targetFile}（从第 ${progress.completedSegments + 1}/${progress.totalSegments} 段继续）`);
+      await autoIngestFile(targetFile, progress.completedSegments, progress.failedSegments || []);
     }
     return;
   }
 
-  if (text === '/continue') {
-    const progress = getIngestProgress();
-    if (!progress || !progress.paused) {
+  if (text.startsWith('/continue')) {
+    const targetFile = text.replace('/continue', '').trim();
+    const allProgress = getIngestProgress();
+    if (!allProgress) {
       appendChat('system', '当前没有暂停的摄入任务');
       return;
     }
-    appendChat('system', `跳过第 ${progress.pausedAt + 1} 段，继续后续段落...`);
+
+    let fileName = targetFile;
+    if (!fileName) {
+      const pausedFiles = Object.entries(allProgress).filter(([, p]) => p.paused);
+      if (pausedFiles.length === 0) {
+        appendChat('system', '当前没有暂停的摄入任务');
+        return;
+      }
+      if (pausedFiles.length === 1) {
+        fileName = pausedFiles[0][0];
+      } else {
+        appendChat('system', `有 ${pausedFiles.length} 个文件暂停中：`);
+        for (const [f, p] of pausedFiles) {
+          appendChat('system', `  - ${f} (第${p.pausedAt + 1}段失败)`);
+        }
+        appendChat('system', '请指定文件: /continue <文件名>');
+        return;
+      }
+    }
+
+    const progress = allProgress[fileName];
+    if (!progress || !progress.paused) {
+      appendChat('system', `${fileName} 没有暂停的摄入任务`);
+      return;
+    }
+    appendChat('system', `跳过 ${fileName} 第 ${progress.pausedAt + 1} 段，继续后续段落...`);
     updateStatus(' ⏳ 继续摄入中...');
     screen.render();
     const nextSegment = progress.pausedAt + 1;
     const failedSegments = progress.failedSegments || [];
-    saveIngestProgress(progress.fileName, nextSegment, progress.totalSegments, { failedSegments });
-    await autoIngestFile(progress.fileName, nextSegment, failedSegments);
+    saveIngestProgress(fileName, nextSegment, progress.totalSegments, { failedSegments });
+    await autoIngestFile(fileName, nextSegment, failedSegments);
     return;
   }
 
@@ -547,8 +651,8 @@ ${domainList}
     appendChat('system', [
       '可用命令:',
       '  /import [路径]  - 导入文件（无路径则弹出选择器）',
-      '  /ingest [文件名] - 手工摄入 raw/ 中的文件（无参数则摄入所有变化文件）',
-      '  /ingest! <文件名> - 强制重新摄入指定文件（忽略哈希检查）',
+      '  /ingest [文件名] [--brief] - 手工摄入（--brief 精简模式）',
+      '  /ingest! <文件名> [--brief] - 强制重新摄入',
       '  /url <网址>     - 抓取网页内容并导入',
       '  /model [名称]   - 查看/切换模型',
       '  /retry          - 重试失败的摄入段落',
@@ -814,7 +918,7 @@ async function importFile(absPath) {
   }
 }
 
-async function autoIngestFile(fileName, startFromSegment = 0, skipSegments = []) {
+async function autoIngestFile(fileName, startFromSegment = 0, skipSegments = [], opts = {}) {
   try {
     const rawFiles = wiki.listRawFiles();
     const targetFile = rawFiles.find(f => f.name === fileName);
@@ -858,6 +962,18 @@ async function autoIngestFile(fileName, startFromSegment = 0, skipSegments = [])
 
         const isFirst = i === 0;
         const isLast = i === totalSegments - 1;
+        const brief = opts.brief;
+
+        const extractRules = brief
+          ? `请基于这段内容，精简提取：
+1. 只提取最核心的概念和实体（每段最多3-5个），忽略次要细节
+2. 概念页面只写简短定义（2-3句话），不需要展开分析
+3. 相关的小概念可以合并为一个页面
+4. 重点关注：核心人物、关键事件、重要主题`
+          : `请基于这段内容：
+1. 提取其中的概念，为每个概念创建 wiki/concepts/ 页面
+2. 提取其中的实体，为每个实体创建 wiki/entities/ 页面
+3. 识别或创建领域（在 frontmatter 的 domains 字段中标注）`;
 
         let instruction;
         if (isFirst) {
@@ -867,42 +983,37 @@ async function autoIngestFile(fileName, startFromSegment = 0, skipSegments = [])
 
 ${segments[i]}
 
-请基于这段内容：
+${brief ? extractRules : `请基于这段内容：
 1. 在 wiki/sources/ 创建来源摘要页面（先写已读到的部分，后续段落会补充）
 2. 提取其中的概念，为每个概念创建 wiki/concepts/ 页面
 3. 提取其中的实体，为每个实体创建 wiki/entities/ 页面
-4. 识别或创建领域，创建/更新 wiki/domains/ 索引页（列出当前已知的概念和实体）
-5. 更新 wiki/index.md（只列顶层领域目录和统计数字，子领域不列入）
+4. 识别或创建领域（在 frontmatter 的 domains 字段中标注）`}
 
-每个文件用 <<<FILE:路径>>> 格式输出。`;
+每个文件用 <<<FILE:路径>>> 格式输出。不需要输出 index.md 和领域索引页（系统会自动更新）。`;
         } else if (isLast) {
           instruction = `继续阅读文档"${fileName}"，这是最后一段（第 ${i + 1}/${totalSegments} 段）：
 
 ${segments[i]}
 
-请基于这段内容：
+${brief ? extractRules + '\n5. 更新 wiki/overview.md\n6. 追加 wiki/log.md 操作记录' : `请基于这段内容：
 1. 补充/更新 wiki/sources/ 来源摘要页面（完整版）
 2. 提取新概念，创建新的 wiki/concepts/ 页面；如果已有概念需要补充，输出更新后的完整页面
 3. 提取新实体，创建新的 wiki/entities/ 页面；如果已有实体需要补充，输出更新后的完整页面
-4. 更新领域索引页（添加新条目，调整领域结构如有必要）
-5. 更新 wiki/index.md（最终版顶层领域目录和统计数字，子领域不列入）
-6. 更新 wiki/overview.md
-7. 追加 wiki/log.md 操作记录
+4. 更新 wiki/overview.md
+5. 追加 wiki/log.md 操作记录`}
 
-每个文件用 <<<FILE:路径>>> 格式输出。`;
+每个文件用 <<<FILE:路径>>> 格式输出。不需要输出 index.md 和领域索引页（系统会自动更新）。`;
         } else {
           instruction = `继续阅读文档"${fileName}"，这是第 ${i + 1}/${totalSegments} 段：
 
 ${segments[i]}
 
-请基于这段内容：
+${brief ? extractRules : `请基于这段内容：
 1. 如果来源摘要需要补充，输出更新后的 wiki/sources/ 页面
 2. 提取新概念，创建新的 wiki/concepts/ 页面；如果已有概念需要补充，输出更新后的完整页面
-3. 提取新实体，创建新的 wiki/entities/ 页面；如果已有实体需要补充，输出更新后的完整页面
-4. 更新领域索引页（添加新条目；如果发现新的子领域或领域需要拆分/合并，直接调整）
-5. 更新 wiki/index.md（只列顶层领域目录和统计数字，子领域不列入）
+3. 提取新实体，创建新的 wiki/entities/ 页面；如果已有实体需要补充，输出更新后的完整页面`}
 
-每个文件用 <<<FILE:路径>>> 格式输出。
+每个文件用 <<<FILE:路径>>> 格式输出。不需要输出 index.md 和领域索引页（系统会自动更新）。
 如果这段没有新的概念或实体需要记录，可以只输出简短说明。`;
         }
 
@@ -933,6 +1044,23 @@ ${segments[i]}
               for (const file of files) wiki.writeFile(file.path, file.content);
               totalFiles += files.length;
               appendChat('system', `  ✓ 第 ${i + 1} 段处理完成，更新了 ${files.length} 个文件`);
+
+              const newConcepts = files.filter(f => f.path.includes('concepts/') || f.path.includes('entities/'));
+              if (newConcepts.length > 0) {
+                const indexMessages = [
+                  { role: 'system', content: wiki.getSystemPrompt() },
+                  { role: 'user', content: `本轮摄入了以下新页面：\n${newConcepts.map(f => `- ${f.path}`).join('\n')}\n\n请更新相关的领域索引页（wiki/domains/）和 wiki/index.md（只列顶层领域目录和统计数字）。\n如果涉及的领域索引页不存在，请创建它。\n只输出需要更新的文件，用 <<<FILE:路径>>> 格式。` },
+                ];
+                try {
+                  let indexResponse = '';
+                  await llm.chatStream(indexMessages, (chunk) => { indexResponse += chunk; });
+                  const indexFiles = parseFileOutputs(indexResponse);
+                  if (indexFiles.length > 0) {
+                    for (const f of indexFiles) wiki.writeFile(f.path, f.content);
+                    totalFiles += indexFiles.length;
+                  }
+                } catch { }
+              }
             } else {
               appendChat('system', `  ✓ 第 ${i + 1} 段无新增内容`);
             }
@@ -958,7 +1086,7 @@ ${segments[i]}
         appendChat('system', `⚠ 摄入基本完成，但有 ${failedSegments.length} 段失败: [${failedSegments.map(s => s + 1).join(', ')}]`);
         appendChat('system', `💡 输入 /retry 重试所有失败段落`);
       } else {
-        clearIngestProgress();
+        clearIngestProgress(fileName);
         appendChat('system', `✓ 增量摄入完成，共更新 ${totalFiles} 个 Wiki 文件`);
       }
 
@@ -1206,18 +1334,19 @@ screen.key(['C-c'], () => process.exit(0));
 appendChat('system', `欢迎使用 LLM Wiki! 当前模型: ${llm.getProviderName()}`);
 appendChat('system', '命令: /import 导入文件 | /url 抓取网页 | /model 切换模型 | /help 帮助');
 const pendingProgress = getIngestProgress();
-if (pendingProgress) {
-  const failed = pendingProgress.failedSegments || [];
-  if (failed.length > 0 && pendingProgress.completedSegments >= pendingProgress.totalSegments) {
-    appendChat('system', `⚠ 有 ${failed.length} 个失败段落待重试: ${pendingProgress.fileName}`);
-    appendChat('system', '  输入 /retry 重试失败段落');
-  } else if (pendingProgress.paused) {
-    appendChat('system', `⚠ 摄入暂停: ${pendingProgress.fileName}（第 ${pendingProgress.pausedAt + 1}/${pendingProgress.totalSegments} 段失败）`);
-    appendChat('system', '  /retry 重试当前段 | /continue 跳过继续');
-  } else {
-    appendChat('system', `⚠ 有未完成的摄入任务: ${pendingProgress.fileName}（${pendingProgress.completedSegments}/${pendingProgress.totalSegments} 段已完成）`);
-    appendChat('system', '  输入 /retry 从断点继续');
+if (pendingProgress && Object.keys(pendingProgress).length > 0) {
+  const files = Object.entries(pendingProgress);
+  appendChat('system', `⚠ 有 ${files.length} 个未完成的摄入任务：`);
+  for (const [f, p] of files) {
+    if (p.paused) {
+      appendChat('system', `  - ${f}（第${p.pausedAt + 1}/${p.totalSegments}段暂停）`);
+    } else if (p.failedSegments && p.failedSegments.length > 0 && p.completedSegments >= p.totalSegments) {
+      appendChat('system', `  - ${f}（${p.failedSegments.length}段失败待重试）`);
+    } else {
+      appendChat('system', `  - ${f}（${p.completedSegments}/${p.totalSegments}段已完成）`);
+    }
   }
+  appendChat('system', '  /retry [文件名] 恢复 | /continue [文件名] 跳过');
 }
 inputBox.readInput();
 screen.render();

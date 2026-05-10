@@ -81,10 +81,12 @@ updated: YYYY-MM-DD
 
 ### 页面命名
 
-- 使用 kebab-case 命名文件：`machine-learning.md`
-- 实体页面以实体名称命名：`openai.md`、`transformer.md`
-- 概念页面以概念名称命名：`attention-mechanism.md`
-- 来源摘要以来源标题简写命名：`attention-is-all-you-need.md`
+- 中文内容使用中文文件名：`注意力机制.md`、`贾宝玉.md`、`太虚幻境.md`
+- 英文/技术内容使用 kebab-case：`transformer.md`、`machine-learning.md`
+- 领域名优先英文（作为分类标签）：`chinese-literature.md`、`deep-learning.md`
+- 如果概念有通用英文术语，用英文：`attention-mechanism.md`
+- 如果概念是中文特有的（人名、地名、文化概念），用中文：`贾宝玉.md`
+- 不要使用汉语拼音命名文件
 
 ## 工作流
 
