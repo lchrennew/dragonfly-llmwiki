@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useKeyboard, useTerminalDimensions } from '@opentui/react'
+import type { MouseEvent } from '@opentui/core'
 import fs from 'fs'
 import path from 'path'
 
@@ -80,6 +81,13 @@ export function FilePicker({ startDir, onSelect, onCancel }: FilePickerProps) {
     }
   }, [entries, handleSelect, DOUBLE_CLICK_MS])
 
+  const handleMouseScroll = useCallback((e: MouseEvent) => {
+    if (e.type === 'scroll' && e.scroll) {
+      const delta = e.scroll.delta * (e.scroll.direction === 'up' ? -1 : 1)
+      setSelectedIndex(i => Math.max(0, Math.min(entries.length - 1, i + delta)))
+    }
+  }, [entries.length])
+
   useKeyboard((key) => {
     if (key.name === 'escape') {
       onCancel()
@@ -119,6 +127,7 @@ export function FilePicker({ startDir, onSelect, onCancel }: FilePickerProps) {
       borderColor="#8be9fd"
       title={` 📂 ${currentDir} `}
       backgroundColor="#282a36"
+      onMouseScroll={handleMouseScroll}
     >
       <scrollbox style={{ flexGrow: 1 }}>
         {visibleEntries.map((entry, i) => {
