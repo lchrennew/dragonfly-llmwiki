@@ -4,7 +4,15 @@ import { parseFileOutputs } from './ingest.js';
 const MAX_AGENT_ROUNDS = 5;
 
 export async function handleQuery(text, ctx) {
-  const { llm, appendChat, updateStatus, screen, chatMessages, chatBox, chatHistory } = ctx;
+  const { llm, appendChat, updateStatus, chatHistory } = ctx;
+  const updateLastChat = ctx.updateLastChat || ((role, text) => {
+    if (ctx.chatMessages && ctx.chatBox) {
+      ctx.chatMessages[ctx.chatMessages.length - 1] = `{yellow-fg}AI:{/yellow-fg} ${text}`;
+      ctx.chatBox.setContent(ctx.chatMessages.join('\n'));
+      ctx.chatBox.setScrollPerc(100);
+      if (ctx.screen) ctx.screen.render();
+    }
+  });
 
   updateStatus(' ⏳ 模型思考中...');
   appendChat('ai', '思考中...');
@@ -18,7 +26,6 @@ export async function handleQuery(text, ctx) {
       const results = wiki.searchWiki(keywords);
       if (results.length > 0) {
         appendChat('system', `  🔍 搜索到 ${results.length} 个相关页面`);
-        screen.render();
         for (const r of results) {
           const content = wiki.readFile(r.path);
           if (content) {
@@ -48,9 +55,7 @@ export async function handleQuery(text, ctx) {
       await saveNewKnowledge(text, finalResponse, ctx);
     }
   } catch (err) {
-    chatMessages[chatMessages.length - 1] = `{red-fg}错误:{/red-fg} ${err.message}`;
-    chatBox.setContent(chatMessages.join('\n'));
-    screen.render();
+    appendChat('system', `错误: ${err.message}`);
   }
 
   updateStatus(ctx.getDefaultStatus());
@@ -73,7 +78,8 @@ async function extractKeywords(text, llm) {
 }
 
 async function agentLoopWithContext(text, searchContext, queryPrompt, ctx) {
-  const { llm, appendChat, updateStatus, screen, chatMessages, chatBox, chatHistory } = ctx;
+  const { llm, appendChat, updateStatus, chatHistory } = ctx;
+  const updateLastChat = ctx.updateLastChat || (() => { });
 
   const messages = [
     { role: 'system', content: queryPrompt },
@@ -96,10 +102,7 @@ async function agentLoopWithContext(text, searchContext, queryPrompt, ctx) {
         .replace(/<<<NOTE:[\s\S]*?>>>$/g, '')
         .replace(/<<<FILE:.*?>>>[\s\S]*?<<<END>>>/g, '[文件操作]')
         .replace(/<<<NEW_KNOWLEDGE>>>/g, '');
-      chatMessages[chatMessages.length - 1] = `{yellow-fg}AI:{/yellow-fg} ${displayText}`;
-      chatBox.setContent(chatMessages.join('\n'));
-      chatBox.setScrollPerc(100);
-      screen.render();
+      updateLastChat('ai', displayText);
     });
 
     const readRequests = extractReadRequests(response);
@@ -115,7 +118,6 @@ async function agentLoopWithContext(text, searchContext, queryPrompt, ctx) {
     }
 
     appendChat('system', `  🔍 探索性检索 ${readRequests.length} 个文件...`);
-    screen.render();
 
     const fileContents = readFiles(readRequests);
 
@@ -130,7 +132,8 @@ async function agentLoopWithContext(text, searchContext, queryPrompt, ctx) {
 }
 
 async function agentLoopWithoutContext(text, queryPrompt, ctx) {
-  const { llm, appendChat, updateStatus, screen, chatMessages, chatBox, chatHistory } = ctx;
+  const { llm, appendChat, updateStatus, chatHistory } = ctx;
+  const updateLastChat = ctx.updateLastChat || (() => { });
 
   const messages = [
     { role: 'system', content: queryPrompt },
@@ -153,10 +156,7 @@ async function agentLoopWithoutContext(text, queryPrompt, ctx) {
         .replace(/<<<NOTE:[\s\S]*?>>>$/g, '')
         .replace(/<<<FILE:.*?>>>[\s\S]*?<<<END>>>/g, '[文件操作]')
         .replace(/<<<NEW_KNOWLEDGE>>>/g, '');
-      chatMessages[chatMessages.length - 1] = `{yellow-fg}AI:{/yellow-fg} ${displayText}`;
-      chatBox.setContent(chatMessages.join('\n'));
-      chatBox.setScrollPerc(100);
-      screen.render();
+      updateLastChat('ai', displayText);
     });
 
     const readRequests = extractReadRequests(response);
@@ -172,7 +172,6 @@ async function agentLoopWithoutContext(text, queryPrompt, ctx) {
     }
 
     appendChat('system', `  🔍 探索性检索 ${readRequests.length} 个文件 (第${round}轮)...`);
-    screen.render();
 
     const fileContents = readFiles(readRequests);
 
@@ -210,11 +209,10 @@ function readFiles(requests) {
 }
 
 async function saveNewKnowledge(question, answer, ctx) {
-  const { llm, appendChat, screen } = ctx;
+  const { llm, appendChat } = ctx;
   const cleanAnswer = answer.replace(/<<<NEW_KNOWLEDGE>>>/g, '').trim();
 
   appendChat('system', '  💡 检测到新知识，正在保存到知识库...');
-  screen.render();
 
   const messages = [
     { role: 'system', content: wiki.getSystemPrompt() },

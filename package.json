@@ -1,16 +1,15 @@
 {
   "name": "dragonfly-llmwiki",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "LLM Wiki - 由大模型驱动的个人知识库",
-  "main": "src/app.js",
+  "main": "src/app.tsx",
   "bin": {
-    "llmwiki": "./src/app.js",
+    "llmwiki": "./src/app.tsx",
     "llmwiki-mcp": "./src/mcp-server.js"
   },
   "scripts": {
-    "start": "node src/app.js",
-    "mcp": "node src/mcp-server.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "bun run src/app.tsx",
+    "mcp": "bun run src/mcp-server.js"
   },
   "keywords": [
     "llm",
@@ -22,12 +21,14 @@
   "type": "module",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "blessed": "^0.1.81",
-    "blessed-contrib": "^4.11.0",
+    "@opentui/core": "^0.2.6",
+    "@opentui/react": "^0.2.6",
     "dotenv": "^17.4.2",
     "marked": "^4.3.0",
     "markitdown-node": "^1.5.2",
     "openai": "^6.37.0",
+    "react": "^19.2.6",
+    "string-width": "^8.2.1",
     "zod": "^4.4.3"
   }
 }

@@ -33,7 +33,15 @@ export function parseFileOutputs(response) {
 }
 
 export async function autoIngestFile(fileName, startFromSegment = 0, skipSegments = [], opts = {}, ctx) {
-  const { llm, appendChat, updateStatus, getDefaultStatus, screen, chatMessages, chatBox } = ctx;
+  const { llm, appendChat, updateStatus, getDefaultStatus } = ctx;
+  const updateLastChat = ctx.updateLastChat || ((role, text) => {
+    if (ctx.chatMessages && ctx.chatBox) {
+      ctx.chatMessages[ctx.chatMessages.length - 1] = `{yellow-fg}AI:{/yellow-fg} ${text}`;
+      ctx.chatBox.setContent(ctx.chatMessages.join('\n'));
+      ctx.chatBox.setScrollPerc(100);
+      if (ctx.screen) ctx.screen.render();
+    }
+  });
 
   try {
     const rawFiles = wiki.listRawFiles();
@@ -62,7 +70,6 @@ export async function autoIngestFile(fileName, startFromSegment = 0, skipSegment
       } else {
         appendChat('system', `文件较长（${content.length}字），将分 ${totalSegments} 段增量摄入...`);
       }
-      screen.render();
 
       let totalFiles = 0;
       const failedSegments = [...skipSegments];
@@ -74,7 +81,6 @@ export async function autoIngestFile(fileName, startFromSegment = 0, skipSegment
         }
 
         appendChat('system', `  📖 阅读第 ${i + 1}/${totalSegments} 段...`);
-        screen.render();
 
         const isFirst = i === 0;
         const isLast = i === totalSegments - 1;
@@ -91,17 +97,13 @@ export async function autoIngestFile(fileName, startFromSegment = 0, skipSegment
         for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
           if (attempt > 0) {
             appendChat('system', `  🔄 第 ${i + 1} 段重试（第 ${attempt} 次）...`);
-            screen.render();
           }
           try {
             let response = '';
             await llm.chatStream(messages, (chunk) => {
               response += chunk;
               const displayText = response.replace(/<<<FILE:.*?>>>[\s\S]*?<<<END>>>/g, '[文件操作]');
-              chatMessages[chatMessages.length - 1] = `{yellow-fg}AI:{/yellow-fg} ${displayText}`;
-              chatBox.setContent(chatMessages.join('\n'));
-              chatBox.setScrollPerc(100);
-              screen.render();
+              updateLastChat('ai', displayText);
             });
 
             const files = parseFileOutputs(response);
@@ -243,12 +245,19 @@ async function updateDomainIndex(newConcepts, fileName, isLast, ctx) {
 }
 
 async function ingestShortFile(fileName, content, MAX_RETRIES, ctx) {
-  const { llm, appendChat, updateStatus, getDefaultStatus, screen, chatMessages, chatBox } = ctx;
+  const { llm, appendChat, updateStatus, getDefaultStatus } = ctx;
+  const updateLastChat = ctx.updateLastChat || ((role, text) => {
+    if (ctx.chatMessages && ctx.chatBox) {
+      ctx.chatMessages[ctx.chatMessages.length - 1] = `{yellow-fg}AI:{/yellow-fg} ${text}`;
+      ctx.chatBox.setContent(ctx.chatMessages.join('\n'));
+      ctx.chatBox.setScrollPerc(100);
+      if (ctx.screen) ctx.screen.render();
+    }
+  });
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     if (attempt > 0) {
       appendChat('system', `🔄 重试摄入（第 ${attempt} 次）...`);
-      screen.render();
     }
     try {
       const messages = [
@@ -260,10 +269,7 @@ async function ingestShortFile(fileName, content, MAX_RETRIES, ctx) {
       await llm.chatStream(messages, (chunk) => {
         response += chunk;
         const displayText = response.replace(/<<<FILE:.*?>>>[\s\S]*?<<<END>>>/g, '[文件操作]');
-        chatMessages[chatMessages.length - 1] = `{yellow-fg}AI:{/yellow-fg} ${displayText}`;
-        chatBox.setContent(chatMessages.join('\n'));
-        chatBox.setScrollPerc(100);
-        screen.render();
+        updateLastChat('ai', displayText);
       });
 
       const files = parseFileOutputs(response);

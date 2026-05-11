@@ -54,3 +54,4 @@ npm-debug.log*
 /wiki/domains/_meta.json
 /wiki/domains/*.md
 /yarn.lock
+/bun.lock
