@@ -10,14 +10,16 @@ interface PromptInputProps {
   value?: string
   onInput?: (val: string) => void
   onSubmit?: (val: string) => void
-  focused?: boolean
   placeholder?: string
   hints?: HintItem[]
 }
 
-export function PromptInput({ value, onInput, onSubmit, focused = true, placeholder, hints = [] }: PromptInputProps) {
+export function PromptInput({ value, onInput, onSubmit, placeholder, hints = [] }: PromptInputProps) {
   const valueRef = useRef('')
   const cursorRef = useRef(0)
+  const historyRef = useRef<string[]>([])
+  const historyIndexRef = useRef(-1)
+  const stashRef = useRef('')
   const [, setTick] = useState(0)
 
   const rerender = useCallback(() => setTick(t => t + 1), [])
@@ -53,19 +55,49 @@ export function PromptInput({ value, onInput, onSubmit, focused = true, placehol
   }, [internalValue, hints])
 
   usePaste((event) => {
-    if (!focused) return
     const text = Buffer.from(event.bytes).toString('utf-8')
     insertText(text)
   })
 
   useKeyboard((key) => {
-    if (!focused) return
     const pos = cursorRef.current
     const val = valueRef.current
 
     if (key.name === 'return') {
+      if (val) {
+        historyRef.current.unshift(val)
+        if (historyRef.current.length > 50) historyRef.current.pop()
+      }
+      historyIndexRef.current = -1
       onSubmit?.(val)
       commit('', 0)
+      return
+    }
+
+    if (key.name === 'up') {
+      const history = historyRef.current
+      if (history.length === 0) return
+      if (historyIndexRef.current === -1) {
+        stashRef.current = val
+      }
+      const newIdx = Math.min(historyIndexRef.current + 1, history.length - 1)
+      historyIndexRef.current = newIdx
+      const entry = history[newIdx]
+      commit(entry, entry.length)
+      return
+    }
+
+    if (key.name === 'down') {
+      if (historyIndexRef.current > 0) {
+        const newIdx = historyIndexRef.current - 1
+        historyIndexRef.current = newIdx
+        const entry = historyRef.current[newIdx]
+        commit(entry, entry.length)
+      } else if (historyIndexRef.current === 0) {
+        historyIndexRef.current = -1
+        const restored = stashRef.current
+        commit(restored, restored.length)
+      }
       return
     }
 
@@ -134,12 +166,6 @@ export function PromptInput({ value, onInput, onSubmit, focused = true, placehol
       }
     }
   })
-
-  if (!focused) {
-    const displayValue = internalValue || placeholder || ''
-    const displayColor = internalValue ? '#ffffff' : '#5c6370'
-    return <text fg={displayColor}>{displayValue}</text>
-  }
 
   const before = internalValue.slice(0, cursorPosition)
   const after = internalValue.slice(cursorPosition + 1)

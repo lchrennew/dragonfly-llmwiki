@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react"
 import { useKeyboard, useTerminalDimensions } from "@opentui/react"
 import { ScrollBoxRenderable } from "@opentui/core"
-import { PromptInput } from "./components/PromptInput.tsx";
+import { PromptInput } from "./components/PromptInput.tsx"
 
 const COMMANDS = [
   { cmd: '/import', desc: '导入文件' },
@@ -39,20 +39,15 @@ export interface UIHandle {
 interface AppProps {
   providerName: string
   callbacks: AppCallbacks
-  uiRef: React.MutableRefObject<UIHandle | null>
+  uiRef: MutableRefObject<UIHandle | null>
 }
 
 export function App({ providerName, callbacks, uiRef }: AppProps) {
   const { width, height } = useTerminalDimensions()
   const [messages, setMessages] = useState<ChatMessage[]>([])
-  const [inputValue, setInputValue] = useState("")
   const [statusText, setStatusText] = useState(`模型: ${providerName} | 输入 /help 查看命令`)
   const [chatLabel, setChatLabel] = useState(`AI [${providerName}]`)
-  const [hintText, setHintText] = useState("")
-  const [hintDesc, setHintDesc] = useState("")
   const [inputFocused, setInputFocused] = useState(true)
-  const [inputHistory] = useState<string[]>([])
-  const [historyIndex, setHistoryIndex] = useState(-1)
   const scrollboxRef = useRef<ScrollBoxRenderable>(null)
 
   const chatHeight = Math.max(height - 4, 5)
@@ -63,121 +58,47 @@ export function App({ providerName, callbacks, uiRef }: AppProps) {
 
   useEffect(() => {
     uiRef.current = {
-      appendChat: (role, text) => {
+      appendChat: (role: 'user' | 'system' | 'ai', text: string) => {
         setMessages(prev => {
           const next = [...prev, { role, text }]
           if (next.length > 200) next.shift()
           return next
         })
-        setTimeout(() => {
-          const scrollbox = scrollboxRef.current
-          if (scrollbox && typeof scrollbox.scrollTo === 'function') {
-            scrollbox.scrollTo(0, 999999)
-          }
-        }, 10)
+        setTimeout(() => scrollboxRef.current?.scrollTo(0, 999999), 10)
       },
-      updateLastChat: (role, text) => {
+      updateLastChat: (role: 'user' | 'system' | 'ai', text: string) => {
         setMessages(prev => {
           if (prev.length === 0) return [{ role, text }]
           const next = [...prev]
           next[next.length - 1] = { role, text }
           return next
         })
-        setTimeout(() => {
-          const scrollbox = scrollboxRef.current
-          if (scrollbox && typeof scrollbox.scrollTo === 'function') {
-            scrollbox.scrollTo(0, 999999)
-          }
-        }, 10)
+        setTimeout(() => scrollboxRef.current?.scrollTo(0, 999999), 10)
       },
-      updateStatus: (text) => setStatusText(text),
+      updateStatus: (text: string) => setStatusText(text),
       getDefaultStatus,
-      setChatLabel: (label) => setChatLabel(label),
+      setChatLabel: (label: string) => setChatLabel(label),
     }
   }, [getDefaultStatus, uiRef])
 
-  const updateHint = useCallback((input: string) => {
-    if (!input?.startsWith('/')) {
-      setHintText("")
-      setHintDesc("")
-      return
-    }
-    const matches = COMMANDS.find(c => c.cmd.startsWith(input) && c.cmd !== input)
-    if (matches) {
-      setHintText(matches.cmd.slice(input.length))
-      setHintDesc(matches.desc)
-    } else {
-      setHintText("")
-      setHintDesc("")
-    }
-  }, [])
-
   const handleSubmit = useCallback((value: string) => {
     if (!value.trim()) return
-    inputHistory.unshift(value)
-    if (inputHistory.length > 50) inputHistory.pop()
-    setHistoryIndex(-1)
-    setInputValue("")
-    setHintText("")
-    setHintDesc("")
     callbacks.onSubmit(value)
-  }, [callbacks, inputHistory])
+  }, [callbacks])
 
   useKeyboard((key) => {
-    if (key.ctrl && key.name === "c") {
-      process.exit(0)
-    }
+    if (key.ctrl && key.name === "c") process.exit(0)
     if (!inputFocused) {
-      if (key.char && !key.ctrl && !key.meta && key.name !== "escape") {
+      if (!key.ctrl && !key.meta && key.name !== "escape" && key.sequence) {
         setInputFocused(true)
-        setInputValue(prev => {
-          const next = prev + key.char
-          updateHint(next)
-          return next
-        })
       }
       return
     }
-    if (key.name === "escape") {
-      setInputFocused(false)
-      return
-    }
-    if (key.name === "up") {
-      if (inputHistory.length === 0) return
-      const newIdx = Math.min(historyIndex + 1, inputHistory.length - 1)
-      setHistoryIndex(newIdx)
-      setInputValue(inputHistory[newIdx])
-      updateHint(inputHistory[newIdx])
-      return
-    }
-    if (key.name === "down") {
-      if (historyIndex > 0) {
-        const newIdx = historyIndex - 1
-        setHistoryIndex(newIdx)
-        setInputValue(inputHistory[newIdx])
-        updateHint(inputHistory[newIdx])
-      } else {
-        setHistoryIndex(-1)
-        setInputValue("")
-        updateHint("")
-      }
-      return
-    }
-    if (key.name === "tab") {
-      if (hintText) {
-        const completed = inputValue + hintText
-        setInputValue(completed)
-        setHintText("")
-        setHintDesc("")
-      }
-      return
-    }
+    if (key.name === "escape") setInputFocused(false)
   })
 
   const formatMessage = (msg: ChatMessage) => {
-    const prefix = msg.role === 'user' ? '你: '
-      : msg.role === 'system' ? '系统: '
-        : 'AI: '
+    const prefix = msg.role === 'user' ? '你: ' : msg.role === 'system' ? '系统: ' : 'AI: '
     return prefix + msg.text
   }
 
@@ -196,13 +117,9 @@ export function App({ providerName, callbacks, uiRef }: AppProps) {
           ))}
         </scrollbox>
       </box>
-
       <box title="输入 (Enter发送)" border borderColor="#c678dd" height={3}>
-
-        <PromptInput hints={COMMANDS} onSubmit={handleSubmit} />
-
+        <PromptInput hints={COMMANDS} onSubmit={handleSubmit} placeholder="输入命令或问题..." />
       </box>
-
       <text fg="#ffffff" bg="#3b4261">{` ${statusText}`}</text>
     </box>
   )

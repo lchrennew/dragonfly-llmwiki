@@ -5,13 +5,9 @@ import { z } from 'zod';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { createRequire } from 'module';
 import * as wiki from './wiki-ops.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const require = createRequire(import.meta.url);
-const { MarkItDown } = require('markitdown-node');
-const markitdown = new MarkItDown();
 
 const server = new McpServer({
   name: 'llmwiki',

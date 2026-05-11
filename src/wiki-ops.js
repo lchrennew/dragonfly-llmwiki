@@ -1,7 +1,6 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import { createRequire } from 'module';
 import { checkChangedFiles, updateMultipleHashes } from './hash-tracker.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -34,8 +33,7 @@ export function getFileTree(dir, prefix = '') {
   return items;
 }
 
-const require = createRequire(import.meta.url);
-const { MarkItDown } = require('markitdown-node');
+const { MarkItDown } = await import('markitdown-ts');
 const markitdown = new MarkItDown();
 
 const CONVERTIBLE_EXTS = ['.pdf', '.docx', '.pptx', '.xlsx', '.html', '.htm', '.csv', '.json', '.xml'];
@@ -75,10 +73,7 @@ export async function readFileAsMarkdown(relPath) {
     const restore = suppressWarnings();
     try {
       const result = await markitdown.convert(fullPath);
-      if (result.status === 'success') {
-        return result.markdown_content || result.text_content || '';
-      }
-      return `[转换失败: ${result.status}]`;
+      return result?.markdown || result?.text_content || '';
     } catch (e) {
       return `[转换错误: ${e.message}]`;
     } finally {
@@ -237,7 +232,7 @@ export async function fetchUrl(url) {
   const restore = suppressWarnings();
   try {
     const result = await markitdown.convert(tempFile);
-    const markdown = result.markdown_content || result.text_content || html;
+    const markdown = result?.markdown || result?.text_content || html;
     const slug = url.replace(/https?:\/\//, '').replace(/[^a-zA-Z0-9\u4e00-\u9fa5]+/g, '-').slice(0, 60);
     const fileName = `${slug}.md`;
     const dest = path.join(RAW_DIR, fileName);
