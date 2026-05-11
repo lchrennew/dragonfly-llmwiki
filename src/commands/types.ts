@@ -9,6 +9,7 @@ export interface CommandContext {
   updateStatus: (text: string) => void
   getDefaultStatus: () => string
   setChatLabel: (label: string) => void
+  showFilePicker: (startDir: string, onSelect: (filePath: string, dir: string) => void) => void
 }
 
 export interface Command {

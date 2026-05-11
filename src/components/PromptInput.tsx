@@ -12,9 +12,10 @@ interface PromptInputProps {
   onSubmit?: (val: string) => void
   placeholder?: string
   hints?: HintItem[]
+  disabled?: boolean
 }
 
-export function PromptInput({ value, onInput, onSubmit, placeholder, hints = [] }: PromptInputProps) {
+export function PromptInput({ value, onInput, onSubmit, placeholder, hints = [], disabled }: PromptInputProps) {
   const valueRef = useRef('')
   const cursorRef = useRef(0)
   const historyRef = useRef<string[]>([])
@@ -60,6 +61,7 @@ export function PromptInput({ value, onInput, onSubmit, placeholder, hints = [] 
   })
 
   useKeyboard((key) => {
+    if (disabled) return
     const pos = cursorRef.current
     const val = valueRef.current
 

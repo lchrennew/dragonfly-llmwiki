@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 
 import { useKeyboard, useTerminalDimensions } from "@opentui/react"
 import { ScrollBoxRenderable } from "@opentui/core"
 import { PromptInput } from "./components/PromptInput.tsx"
+import { FilePicker } from "./components/FilePicker.tsx"
 
 const COMMANDS = [
   { cmd: '/import', desc: '导入文件' },
@@ -34,6 +35,7 @@ export interface UIHandle {
   updateStatus: (text: string) => void
   getDefaultStatus: () => string
   setChatLabel: (label: string) => void
+  showFilePicker: (startDir: string, onSelect: (filePath: string, dir: string) => void) => void
 }
 
 interface AppProps {
@@ -49,6 +51,7 @@ export function App({ providerName, callbacks, uiRef }: AppProps) {
   const [chatLabel, setChatLabel] = useState(`AI [${providerName}]`)
   const [inputFocused, setInputFocused] = useState(true)
   const scrollboxRef = useRef<ScrollBoxRenderable>(null)
+  const [pickerState, setPickerState] = useState<{ startDir: string; onSelect: (filePath: string, dir: string) => void } | null>(null)
 
   const chatHeight = Math.max(height - 4, 5)
 
@@ -78,6 +81,10 @@ export function App({ providerName, callbacks, uiRef }: AppProps) {
       updateStatus: (text: string) => setStatusText(text),
       getDefaultStatus,
       setChatLabel: (label: string) => setChatLabel(label),
+      showFilePicker: (startDir: string, onSelect: (filePath: string, dir: string) => void) => {
+        setPickerState({ startDir, onSelect })
+        setInputFocused(false)
+      },
     }
   }, [getDefaultStatus, uiRef])
 
@@ -86,8 +93,20 @@ export function App({ providerName, callbacks, uiRef }: AppProps) {
     callbacks.onSubmit(value)
   }, [callbacks])
 
+  const handlePickerSelect = useCallback((filePath: string, dir: string) => {
+    setPickerState(null)
+    setInputFocused(true)
+    pickerState?.onSelect(filePath, dir)
+  }, [pickerState])
+
+  const handlePickerCancel = useCallback(() => {
+    setPickerState(null)
+    setInputFocused(true)
+  }, [])
+
   useKeyboard((key) => {
     if (key.ctrl && key.name === "c") process.exit(0)
+    if (pickerState) return
     if (!inputFocused) {
       if (!key.ctrl && !key.meta && key.name !== "escape" && key.sequence) {
         setInputFocused(true)
@@ -118,9 +137,16 @@ export function App({ providerName, callbacks, uiRef }: AppProps) {
         </scrollbox>
       </box>
       <box title="输入 (Enter发送)" border borderColor="#c678dd" height={3}>
-        <PromptInput hints={COMMANDS} onSubmit={handleSubmit} placeholder="输入命令或问题..." />
+        <PromptInput hints={COMMANDS} onSubmit={handleSubmit} placeholder="输入命令或问题..." disabled={!!pickerState} />
       </box>
       <text fg="#ffffff" bg="#3b4261">{` ${statusText}`}</text>
+      {pickerState && (
+        <FilePicker
+          startDir={pickerState.startDir}
+          onSelect={handlePickerSelect}
+          onCancel={handlePickerCancel}
+        />
+      )}
     </box>
   )
 }

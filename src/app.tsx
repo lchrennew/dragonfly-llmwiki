@@ -20,6 +20,7 @@ function getCommandContext(): CommandContext {
     updateStatus: (text) => ui?.updateStatus(text),
     getDefaultStatus: () => ui?.getDefaultStatus() || '',
     setChatLabel: (label) => ui?.setChatLabel(label),
+    showFilePicker: (startDir, onSelect) => ui?.showFilePicker(startDir, onSelect),
   }
 }
 

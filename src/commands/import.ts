@@ -2,7 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import type { Command, CommandContext } from './types.js'
 import * as wiki from '../wiki-ops.js'
-import { setLastImportDir } from '../config.js'
+import { getLastImportDir, setLastImportDir } from '../config.js'
 import { autoIngestFile } from '../ingest.js'
 
 export const importCommand: Command = {
@@ -11,7 +11,10 @@ export const importCommand: Command = {
   async execute(input: string, ctx: CommandContext) {
     const filePath = input.replace('/import', '').trim()
     if (!filePath) {
-      ctx.appendChat('system', '用法: /import <文件路径>')
+      ctx.showFilePicker(getLastImportDir(), (selected, dir) => {
+        setLastImportDir(dir)
+        importFile(selected, ctx)
+      })
       return
     }
     const absPath = path.resolve(filePath)
@@ -80,9 +83,9 @@ function buildIngestContext(ctx: CommandContext) {
     updateLastChat: (role: string, text: string) => ctx.ui?.updateLastChat(role as any, text),
     updateStatus: (text: string) => ctx.updateStatus(text),
     getDefaultStatus: () => ctx.getDefaultStatus(),
-    screen: { render: () => {} },
+    screen: { render: () => { } },
     chatMessages: [],
-    chatBox: { setContent: () => {}, setScrollPerc: () => {}, setLabel: (l: string) => ctx.setChatLabel(l) },
+    chatBox: { setContent: () => { }, setScrollPerc: () => { }, setLabel: (l: string) => ctx.setChatLabel(l) },
     chatHistory: ctx.chatHistory,
   }
 }
