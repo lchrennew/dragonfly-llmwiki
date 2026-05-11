@@ -53,7 +53,9 @@ export function App({ providerName, callbacks, uiRef }: AppProps) {
   const scrollboxRef = useRef<ScrollBoxRenderable>(null)
   const [pickerState, setPickerState] = useState<{ startDir: string; onSelect: (filePath: string, dir: string) => void } | null>(null)
 
-  const chatHeight = Math.max(height - 4, 5)
+  const inputBoxHeight = Math.min(Math.floor(height * 0.3), 10)
+  const statusBarHeight = 1
+  const chatHeight = height - inputBoxHeight - statusBarHeight
 
   const getDefaultStatus = useCallback(() => {
     return `模型: ${providerName} | 输入 /help 查看命令`
@@ -129,14 +131,14 @@ export function App({ providerName, callbacks, uiRef }: AppProps) {
 
   return (
     <box flexDirection="column" width={width} height={height}>
-      <box title={chatLabel} border borderColor="#e5c07b" height={chatHeight} flexGrow={1}>
+      <box title={chatLabel} border borderColor="#e5c07b" height={chatHeight}>
         <scrollbox ref={scrollboxRef} focused={!inputFocused} style={{ flexGrow: 1 }}>
           {messages.map((msg, i) => (
             <text key={i} fg={roleColor(msg.role)}>{formatMessage(msg)}</text>
           ))}
         </scrollbox>
       </box>
-      <box title="输入 (Enter发送)" border borderColor="#c678dd" height={3}>
+      <box title="输入 (Enter换行, Ctrl+Enter发送)" border borderColor="#c678dd" height={inputBoxHeight}>
         <PromptInput hints={COMMANDS} onSubmit={handleSubmit} placeholder="输入命令或问题..." disabled={!!pickerState} />
       </box>
       <text fg="#ffffff" bg="#3b4261">{` ${statusText}`}</text>

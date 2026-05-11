@@ -38,12 +38,11 @@ export function PromptInput({ value, onInput, onSubmit, placeholder, hints = [],
   }, [rerender])
 
   const insertText = useCallback((text: string) => {
-    const sanitized = text.replace(/[\n\r]/g, '')
-    if (!sanitized) return
+    if (!text) return
     const pos = cursorRef.current
     const prev = valueRef.current
-    const next = prev.slice(0, pos) + sanitized + prev.slice(pos)
-    commit(next, pos + sanitized.length)
+    const next = prev.slice(0, pos) + text + prev.slice(pos)
+    commit(next, pos + text.length)
   }, [commit])
 
   const internalValue = valueRef.current
@@ -66,13 +65,17 @@ export function PromptInput({ value, onInput, onSubmit, placeholder, hints = [],
     const val = valueRef.current
 
     if (key.name === 'return') {
-      if (val) {
-        historyRef.current.unshift(val)
-        if (historyRef.current.length > 50) historyRef.current.pop()
+      if (key.ctrl) {
+        if (val) {
+          historyRef.current.unshift(val)
+          if (historyRef.current.length > 50) historyRef.current.pop()
+        }
+        historyIndexRef.current = -1
+        onSubmit?.(val)
+        commit('', 0)
+      } else {
+        insertText('\n')
       }
-      historyIndexRef.current = -1
-      onSubmit?.(val)
-      commit('', 0)
       return
     }
 
@@ -171,13 +174,48 @@ export function PromptInput({ value, onInput, onSubmit, placeholder, hints = [],
 
   const before = internalValue.slice(0, cursorPosition)
   const after = internalValue.slice(cursorPosition + 1)
-    || (hintMatch && <span fg="#5c6370">{hintMatch.cmd.slice(internalValue.length + 1)} {hintMatch.desc}</span>)
-  const cursorChar = internalValue[cursorPosition]
-    || (hintMatch && (internalValue.length === cursorPosition) && <span fg="#5c6370">{hintMatch.cmd[internalValue.length]}</span>)
-    || ' '
-  return <text fg="#ffffff">
-    {before}
-    <span bg="#ffffff" fg="#000000">{cursorChar}</span>
-    {after}
-  </text>
+  const cursorChar = internalValue[cursorPosition] || ' '
+
+  if (!internalValue && placeholder) {
+    return <text fg="#5c6370">
+      <span bg="#ffffff" fg="#000000"> </span>
+      {placeholder}
+    </text>
+  }
+
+  const lines = internalValue.split('\n')
+  const beforeLines = before.split('\n')
+  const cursorLine = beforeLines.length - 1
+  const cursorCol = beforeLines[cursorLine].length
+
+  const renderLines = lines.map((line, lineIdx) => {
+    if (lineIdx === cursorLine) {
+      const beforeCursor = line.slice(0, cursorCol)
+      const atCursor = line[cursorCol] || ' '
+      const afterCursor = line.slice(cursorCol + 1)
+      return (
+        <text key={lineIdx} fg="#ffffff">
+          {beforeCursor}
+          <span bg="#ffffff" fg="#000000">{atCursor}</span>
+          {afterCursor}
+        </text>
+      )
+    }
+    return <text key={lineIdx} fg="#ffffff">{line || ' '}</text>
+  })
+
+  if (hintMatch && cursorPosition === internalValue.length) {
+    const hintText = hintMatch.cmd.slice(internalValue.length)
+    const lastLineIdx = renderLines.length - 1
+    renderLines[lastLineIdx] = (
+      <text key={lastLineIdx} fg="#ffffff">
+        {lines[lastLineIdx]}
+        <span fg="#5c6370">{hintText} {hintMatch.desc}</span>
+      </text>
+    )
+  }
+
+  return <scrollbox style={{ flexGrow: 1 }}>
+    {renderLines}
+  </scrollbox>
 }
