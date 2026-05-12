@@ -17,6 +17,7 @@ export const helpCommand: Command = {
       '  /reindex        - 重建索引层级结构',
       '  /prune          - 清理不可达的领域索引页',
       '  /lint           - 健康检查',
+      '  /clear          - 清空对话框内容',
       '  /exit /quit /bye - 退出程序',
       '  /help           - 显示帮助',
       '',

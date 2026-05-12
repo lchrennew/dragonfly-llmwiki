@@ -16,6 +16,7 @@ const COMMANDS = [
   { cmd: '/reindex', desc: '重建索引' },
   { cmd: '/prune', desc: '清理不可达领域' },
   { cmd: '/lint', desc: '健康检查' },
+  { cmd: '/clear', desc: '清空对话框' },
   { cmd: '/help', desc: '显示帮助' },
   { cmd: '/bye', desc: '退出程序' },
 ]
@@ -25,17 +26,18 @@ export interface AppCallbacks {
 }
 
 interface ChatMessage {
-  role: 'user' | 'system' | 'ai'
+  role: 'user' | 'system' | 'ai' | 'debug'
   text: string
 }
 
 export interface UIHandle {
-  appendChat: (role: 'user' | 'system' | 'ai', text: string) => void
-  updateLastChat: (role: 'user' | 'system' | 'ai', text: string) => void
+  appendChat: (role: 'user' | 'system' | 'ai' | 'debug', text: string) => void
+  updateLastChat: (role: 'user' | 'system' | 'ai' | 'debug', text: string) => void
   updateStatus: (text: string) => void
   getDefaultStatus: () => string
   setChatLabel: (label: string) => void
   showFilePicker: (startDir: string, onSelect: (filePath: string, dir: string) => void) => void
+  clearChat: () => void
 }
 
 interface AppProps {
@@ -48,8 +50,7 @@ export function App({ providerName, callbacks, uiRef }: AppProps) {
   const { width, height } = useTerminalDimensions()
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [statusText, setStatusText] = useState(`模型: ${providerName} | 输入 /help 查看命令`)
-  const [chatLabel, setChatLabel] = useState(`AI [${providerName}]`)
-  const [inputFocused, setInputFocused] = useState(true)
+  const [chatLabel, setChatLabel] = useState('对话')
   const scrollboxRef = useRef<ScrollBoxRenderable>(null)
   const [pickerState, setPickerState] = useState<{ startDir: string; onSelect: (filePath: string, dir: string) => void } | null>(null)
 
@@ -63,30 +64,28 @@ export function App({ providerName, callbacks, uiRef }: AppProps) {
 
   useEffect(() => {
     uiRef.current = {
-      appendChat: (role: 'user' | 'system' | 'ai', text: string) => {
+      appendChat: (role: 'user' | 'system' | 'ai' | 'debug', text: string) => {
         setMessages(prev => {
           const next = [...prev, { role, text }]
           if (next.length > 200) next.shift()
           return next
         })
-        setTimeout(() => scrollboxRef.current?.scrollTo(0, 999999), 10)
       },
-      updateLastChat: (role: 'user' | 'system' | 'ai', text: string) => {
+      updateLastChat: (role: 'user' | 'system' | 'ai' | 'debug', text: string) => {
         setMessages(prev => {
           if (prev.length === 0) return [{ role, text }]
           const next = [...prev]
           next[next.length - 1] = { role, text }
           return next
         })
-        setTimeout(() => scrollboxRef.current?.scrollTo(0, 999999), 10)
       },
       updateStatus: (text: string) => setStatusText(text),
       getDefaultStatus,
       setChatLabel: (label: string) => setChatLabel(label),
       showFilePicker: (startDir: string, onSelect: (filePath: string, dir: string) => void) => {
         setPickerState({ startDir, onSelect })
-        setInputFocused(false)
       },
+      clearChat: () => setMessages([]),
     }
   }, [getDefaultStatus, uiRef])
 
@@ -97,48 +96,43 @@ export function App({ providerName, callbacks, uiRef }: AppProps) {
 
   const handlePickerSelect = useCallback((filePath: string, dir: string) => {
     setPickerState(null)
-    setInputFocused(true)
     pickerState?.onSelect(filePath, dir)
   }, [pickerState])
 
   const handlePickerCancel = useCallback(() => {
     setPickerState(null)
-    setInputFocused(true)
   }, [])
 
   useKeyboard((key) => {
     if (key.ctrl && key.name === "c") process.exit(0)
     if (pickerState) return
-    if (!inputFocused) {
-      if (!key.ctrl && !key.meta && key.name !== "escape" && key.sequence) {
-        setInputFocused(true)
-      }
-      return
-    }
-    if (key.name === "escape") setInputFocused(false)
   })
 
   const formatMessage = (msg: ChatMessage) => {
-    const prefix = msg.role === 'user' ? '你: ' : msg.role === 'system' ? '系统: ' : 'AI: '
+    const prefix = msg.role === 'user' ? '你: '
+      : msg.role === 'system' ? '系统: '
+        : msg.role === 'debug' ? '调试: '
+          : 'AI: '
     return prefix + msg.text
   }
 
   const roleColor = (role: string) => {
     if (role === 'user') return '#ff79c6'
     if (role === 'system') return '#8be9fd'
+    if (role === 'debug') return '#bd93f9'
     return '#f1fa8c'
   }
 
   return (
     <box flexDirection="column" width={width} height={height}>
       <box title={chatLabel} border borderColor="#e5c07b" height={chatHeight}>
-        <scrollbox ref={scrollboxRef} focused={!inputFocused} style={{ flexGrow: 1 }}>
+        <scrollbox ref={scrollboxRef} focused={false} stickyScroll stickyStart="bottom" style={{ flexGrow: 1 }}>
           {messages.map((msg, i) => (
             <text key={i} fg={roleColor(msg.role)}>{formatMessage(msg)}</text>
           ))}
         </scrollbox>
       </box>
-      <box title="输入 (Enter换行, Ctrl+Enter发送)" border borderColor="#c678dd" height={inputBoxHeight}>
+      <box title="输入 (Enter换行, Cmd/Ctrl+Enter发送)" border borderColor="#c678dd" height={inputBoxHeight}>
         <PromptInput hints={COMMANDS} onSubmit={handleSubmit} placeholder="输入命令或问题..." disabled={!!pickerState} />
       </box>
       <text fg="#ffffff" bg="#3b4261">{` ${statusText}`}</text>

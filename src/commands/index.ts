@@ -11,6 +11,7 @@ import { retryCommand } from './retry.js'
 import { continueCommand } from './continue.js'
 import { learnCommand } from './learn.js'
 import { reindexCommand } from './reindex.js'
+import { clearCommand } from './clear.js'
 
 export const commands: Command[] = [
   exitCommand,
@@ -26,6 +27,7 @@ export const commands: Command[] = [
   continueCommand,
   learnCommand,
   reindexCommand,
+  clearCommand,
 ]
 
 export type { Command, CommandContext } from './types.js'

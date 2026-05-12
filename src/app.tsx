@@ -1,11 +1,14 @@
 #!/usr/bin/env bun
 import { createCliRenderer } from "@opentui/core"
 import { createRoot } from "@opentui/react"
+import { createDefaultOpenTuiKeymap } from "@opentui/keymap/opentui"
+import { KeymapProvider } from "@opentui/keymap/react"
 import { LLMClient } from './llm-client.js'
 import { getIngestProgress } from './config.js'
 import { handleQuery } from './query.js'
 import { App, type UIHandle } from './ui.tsx'
 import { commands, type CommandContext } from './commands/index.js'
+import { setDebugUI, debug } from './debug.js'
 
 const llm = new LLMClient()
 const chatHistory: any[] = []
@@ -67,6 +70,7 @@ function cleanupTerminal() {
 
 async function main() {
   const renderer = await createCliRenderer({ exitOnCtrlC: false })
+  const keymap = createDefaultOpenTuiKeymap(renderer)
   const uiRef = { current: null as UIHandle | null }
 
   process.on('SIGINT', () => { cleanupTerminal(); renderer.destroy(); process.exit(0) })
@@ -76,7 +80,11 @@ async function main() {
   const callbacks = { onSubmit: (text: string) => { handleUserInput(text) } }
 
   function Root() {
-    return <App providerName={llm.getProviderName()} callbacks={callbacks} uiRef={uiRef} />
+    return (
+      <KeymapProvider keymap={keymap}>
+        <App providerName={llm.getProviderName()} callbacks={callbacks} uiRef={uiRef} />
+      </KeymapProvider>
+    )
   }
 
   createRoot(renderer).render(<Root />)
@@ -88,6 +96,9 @@ async function main() {
     console.error('UI not initialized!')
     process.exit(1)
   }
+
+  setDebugUI(ui)
+  debug.print('系统调试已就位')
 
   ui.appendChat('system', `欢迎使用 LLM Wiki! 当前模型: ${llm.getProviderName()}`)
   ui.appendChat('system', '命令: /import 导入文件 | /url 抓取网页 | /model 切换模型 | /help 帮助')

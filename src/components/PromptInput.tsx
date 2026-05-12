@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
 import { useKeyboard, usePaste } from '@opentui/react'
+import { useBindings } from '@opentui/keymap/react'
 
 interface HintItem {
   cmd: string
@@ -45,6 +46,31 @@ export function PromptInput({ value, onInput, onSubmit, placeholder, hints = [],
     commit(next, pos + text.length)
   }, [commit])
 
+  const handleSubmit = useCallback(() => {
+    const val = valueRef.current
+    if (val) {
+      historyRef.current.unshift(val)
+      if (historyRef.current.length > 50) historyRef.current.pop()
+    }
+    historyIndexRef.current = -1
+    onSubmit?.(val)
+    commit('', 0)
+  }, [onSubmit, commit])
+
+  useBindings(() => ({
+    commands: [
+      {
+        name: 'submit-input',
+        run: () => handleSubmit()
+      }
+    ],
+    bindings: [
+      { key: 'ctrl+return', cmd: 'submit-input' },
+      { key: { name: 'return', ctrl: true }, cmd: 'submit-input' },
+      { key: { name: 'return', meta: true }, cmd: 'submit-input' }
+    ]
+  }), [handleSubmit])
+
   const internalValue = valueRef.current
   const cursorPosition = cursorRef.current
 
@@ -65,17 +91,7 @@ export function PromptInput({ value, onInput, onSubmit, placeholder, hints = [],
     const val = valueRef.current
 
     if (key.name === 'return') {
-      if (key.ctrl) {
-        if (val) {
-          historyRef.current.unshift(val)
-          if (historyRef.current.length > 50) historyRef.current.pop()
-        }
-        historyIndexRef.current = -1
-        onSubmit?.(val)
-        commit('', 0)
-      } else {
-        insertText('\n')
-      }
+      insertText('\n')
       return
     }
 
