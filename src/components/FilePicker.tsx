@@ -21,6 +21,7 @@ export function FilePicker({ startDir, onSelect, onCancel }: FilePickerProps) {
   const { width, height } = useTerminalDimensions()
   const [currentDir, setCurrentDir] = useState(startDir)
   const [selectedIndex, setSelectedIndex] = useState(0)
+  const [scrollOffset, setScrollOffset] = useState(0)
   const lastClickRef = useRef<{ index: number; time: number }>({ index: -1, time: 0 })
   const DOUBLE_CLICK_MS = 400
 
@@ -49,12 +50,21 @@ export function FilePicker({ startDir, onSelect, onCancel }: FilePickerProps) {
 
   useEffect(() => {
     setSelectedIndex(0)
+    setScrollOffset(0)
   }, [currentDir])
 
   const pickerHeight = Math.min(Math.floor(height * 0.6), entries.length + 2)
   const pickerWidth = Math.min(Math.floor(width * 0.7), 80)
   const visibleCount = pickerHeight - 2
-  const scrollOffset = Math.max(0, selectedIndex - visibleCount + 1)
+
+  // 同步键盘选择与滚动
+  useEffect(() => {
+    if (selectedIndex < scrollOffset) {
+      setScrollOffset(selectedIndex)
+    } else if (selectedIndex >= scrollOffset + visibleCount) {
+      setScrollOffset(selectedIndex - visibleCount + 1)
+    }
+  }, [selectedIndex, visibleCount])
 
   const handleSelect = useCallback((entry: DirEntry) => {
     if (entry.type === 'dir') {
@@ -84,9 +94,9 @@ export function FilePicker({ startDir, onSelect, onCancel }: FilePickerProps) {
   const handleMouseScroll = useCallback((e: MouseEvent) => {
     if (e.type === 'scroll' && e.scroll) {
       const delta = e.scroll.delta * (e.scroll.direction === 'up' ? -1 : 1)
-      setSelectedIndex(i => Math.max(0, Math.min(entries.length - 1, i + delta)))
+      setScrollOffset(offset => Math.max(0, Math.min(entries.length - visibleCount, offset + delta)))
     }
-  }, [entries.length])
+  }, [entries.length, visibleCount])
 
   useKeyboard((key) => {
     if (key.name === 'escape') {

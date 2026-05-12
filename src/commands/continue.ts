@@ -6,29 +6,42 @@ export const continueCommand: Command = {
   name: 'continue',
   match: (input: string) => input.startsWith('/continue'),
   async execute(input: string, ctx: CommandContext) {
-    const targetFile = input.replace('/continue', '').trim()
+    const targetInput = input.replace('/continue', '').trim()
     const allProgress = getIngestProgress()
     if (!allProgress) {
       ctx.appendChat('system', '当前没有暂停的摄入任务')
       return
     }
 
-    let fileName = targetFile
+    const pausedFiles = Object.entries(allProgress).filter(([, p]: any) => p.paused)
+    if (pausedFiles.length === 0) {
+      ctx.appendChat('system', '当前没有暂停的摄入任务')
+      return
+    }
+
+    let fileName = targetInput
     if (!fileName) {
-      const pausedFiles = Object.entries(allProgress).filter(([, p]: any) => p.paused)
-      if (pausedFiles.length === 0) {
-        ctx.appendChat('system', '当前没有暂停的摄入任务')
-        return
-      }
       if (pausedFiles.length === 1) {
         fileName = pausedFiles[0][0]
       } else {
         ctx.appendChat('system', `有 ${pausedFiles.length} 个文件暂停中：`)
-        for (const [f, p] of pausedFiles as any) {
-          ctx.appendChat('system', `  - ${f} (第${p.pausedAt + 1}段失败)`)
+        for (let i = 0; i < pausedFiles.length; i++) {
+          const [f, p] = pausedFiles[i] as any
+          ctx.appendChat('system', `  ${i + 1}. ${f} (第${p.pausedAt + 1}段失败)`)
         }
-        ctx.appendChat('system', '请指定文件: /continue <文件名>')
+        ctx.appendChat('system', '请输入序号: /continue <序号>')
         return
+      }
+    } else {
+      const indexMatch = targetInput.match(/^(\d+)$/)
+      if (indexMatch) {
+        const index = parseInt(indexMatch[1], 10) - 1
+        if (index >= 0 && index < pausedFiles.length) {
+          fileName = pausedFiles[index][0]
+        } else {
+          ctx.appendChat('system', `序号 ${indexMatch[1]} 超出范围（1-${pausedFiles.length}）`)
+          return
+        }
       }
     }
 

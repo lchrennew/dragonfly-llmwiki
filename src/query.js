@@ -100,7 +100,9 @@ async function agentLoopWithContext(text, searchContext, queryPrompt, ctx) {
       const displayText = response
         .replace(/<<<READ:.*?>>>/g, '[检索中...]')
         .replace(/<<<NOTE:[\s\S]*?>>>$/g, '')
-        .replace(/<<<FILE:.*?>>>[\s\S]*?<<<END>>>/g, '[文件操作]')
+        .replace(/<<<FILE:(.*?)>>>[\s\S]*?<<<END>>>/g, (match, filePath) => {
+          return `更新文件: ${filePath.trim()}`;
+        })
         .replace(/<<<NEW_KNOWLEDGE>>>/g, '');
       updateLastChat('ai', displayText);
     });
@@ -154,7 +156,9 @@ async function agentLoopWithoutContext(text, queryPrompt, ctx) {
       const displayText = response
         .replace(/<<<READ:.*?>>>/g, '[检索中...]')
         .replace(/<<<NOTE:[\s\S]*?>>>$/g, '')
-        .replace(/<<<FILE:.*?>>>[\s\S]*?<<<END>>>/g, '[文件操作]')
+        .replace(/<<<FILE:(.*?)>>>[\s\S]*?<<<END>>>/g, (match, filePath) => {
+          return `更新文件: ${filePath.trim()}`;
+        })
         .replace(/<<<NEW_KNOWLEDGE>>>/g, '');
       updateLastChat('ai', displayText);
     });

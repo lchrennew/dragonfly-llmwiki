@@ -107,16 +107,18 @@ async function main() {
   if (pendingProgress && Object.keys(pendingProgress).length > 0) {
     const files = Object.entries(pendingProgress)
     ui.appendChat('system', `⚠ 有 ${files.length} 个未完成的摄入任务：`)
+    let index = 1
     for (const [f, p] of files as any) {
       if (p.paused) {
-        ui.appendChat('system', `  - ${f}（第${p.pausedAt + 1}/${p.totalSegments}段暂停）`)
+        ui.appendChat('system', `  ${index}. ${f}（第${p.pausedAt + 1}/${p.totalSegments}段暂停）`)
       } else if (p.failedSegments?.length > 0 && p.completedSegments >= p.totalSegments) {
-        ui.appendChat('system', `  - ${f}（${p.failedSegments.length}段失败待重试）`)
+        ui.appendChat('system', `  ${index}. ${f}（${p.failedSegments.length}段失败待重试）`)
       } else {
-        ui.appendChat('system', `  - ${f}（${p.completedSegments}/${p.totalSegments}段已完成）`)
+        ui.appendChat('system', `  ${index}. ${f}（${p.completedSegments}/${p.totalSegments}段已完成）`)
       }
+      index++
     }
-    ui.appendChat('system', '  /retry [文件名] 恢复 | /continue [文件名] 跳过')
+    ui.appendChat('system', '  /retry [序号] 恢复 | /continue [序号] 跳过')
   }
 }
 

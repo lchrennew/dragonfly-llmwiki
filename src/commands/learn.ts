@@ -29,7 +29,9 @@ async function doLearn(content: string, ctx: CommandContext) {
     ctx.ui?.appendChat('ai', '')
     await ctx.llm.chatStream(messages, (chunk: string) => {
       response += chunk
-      const displayText = response.replace(/<<<FILE:.*?>>>[\s\S]*?<<<END>>>/g, '[文件操作]')
+      const displayText = response.replace(/<<<FILE:(.*?)>>>[\s\S]*?<<<END>>>/g, (match: string, filePath: string) => {
+        return `更新文件: ${filePath.trim()}`
+      })
       ctx.ui?.updateLastChat('ai', displayText)
     })
 

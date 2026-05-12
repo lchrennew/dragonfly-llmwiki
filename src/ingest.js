@@ -102,9 +102,16 @@ export async function autoIngestFile(fileName, startFromSegment = 0, skipSegment
             let response = '';
             await llm.chatStream(messages, (chunk) => {
               response += chunk;
-              const displayText = response.replace(/<<<FILE:.*?>>>[\s\S]*?<<<END>>>/g, '[文件操作]');
+              const displayText = response.replace(/<<<FILE:(.*?)>>>[\s\S]*?<<<END>>>/g, (match, filePath) => {
+                return `更新文件: ${filePath.trim()}`;
+              });
               updateLastChat('ai', displayText);
             });
+
+            const displayText = response.replace(/<<<FILE:(.*?)>>>[\s\S]*?<<<END>>>/g, (match, filePath) => {
+              return `更新文件: ${filePath.trim()}`;
+            });
+            updateLastChat('ai', displayText);
 
             const files = parseFileOutputs(response);
             if (files.length > 0) {
@@ -268,7 +275,9 @@ async function ingestShortFile(fileName, content, MAX_RETRIES, ctx) {
       let response = '';
       await llm.chatStream(messages, (chunk) => {
         response += chunk;
-        const displayText = response.replace(/<<<FILE:.*?>>>[\s\S]*?<<<END>>>/g, '[文件操作]');
+        const displayText = response.replace(/<<<FILE:(.*?)>>>[\s\S]*?<<<END>>>/g, (match, filePath) => {
+          return `更新文件: ${filePath.trim()}`;
+        });
         updateLastChat('ai', displayText);
       });
 

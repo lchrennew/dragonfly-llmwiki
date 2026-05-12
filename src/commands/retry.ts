@@ -6,35 +6,49 @@ export const retryCommand: Command = {
   name: 'retry',
   match: (input: string) => input.startsWith('/retry'),
   async execute(input: string, ctx: CommandContext) {
-    const targetFile = input.replace('/retry', '').trim()
+    const targetInput = input.replace('/retry', '').trim()
     const allProgress = getIngestProgress()
     if (!allProgress || Object.keys(allProgress).length === 0) {
       ctx.appendChat('system', '没有需要恢复的摄入任务')
       return
     }
 
-    if (!targetFile) {
-      const files = Object.keys(allProgress)
+    const files = Object.keys(allProgress)
+
+    if (!targetInput) {
       if (files.length === 1) {
         await retryFile(files[0], allProgress[files[0]], ctx)
       } else {
         ctx.appendChat('system', `有 ${files.length} 个文件有未完成的摄入任务：`)
-        for (const f of files) {
+        for (let i = 0; i < files.length; i++) {
+          const f = files[i]
           const p = allProgress[f]
           const status = p.paused ? '暂停' : `${p.completedSegments}/${p.totalSegments}`
-          ctx.appendChat('system', `  - ${f} (${status})`)
+          ctx.appendChat('system', `  ${i + 1}. ${f} (${status})`)
         }
-        ctx.appendChat('system', '请指定文件: /retry <文件名>')
+        ctx.appendChat('system', '请输入序号: /retry <序号>')
       }
       return
     }
 
-    const progress = allProgress[targetFile]
-    if (!progress) {
-      ctx.appendChat('system', `没有找到 ${targetFile} 的摄入进度`)
+    const indexMatch = targetInput.match(/^(\d+)$/)
+    if (indexMatch) {
+      const index = parseInt(indexMatch[1], 10) - 1
+      if (index >= 0 && index < files.length) {
+        const fileName = files[index]
+        await retryFile(fileName, allProgress[fileName], ctx)
+      } else {
+        ctx.appendChat('system', `序号 ${indexMatch[1]} 超出范围（1-${files.length}）`)
+      }
       return
     }
-    await retryFile(targetFile, progress, ctx)
+
+    const progress = allProgress[targetInput]
+    if (!progress) {
+      ctx.appendChat('system', `没有找到 ${targetInput} 的摄入进度`)
+      return
+    }
+    await retryFile(targetInput, progress, ctx)
   },
 }
 
